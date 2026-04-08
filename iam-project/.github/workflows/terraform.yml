@@ -1,0 +1,177 @@
+name: Terraform IAM Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (dev or prod)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
+      action:
+        description: "Terraform action to run"
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+
+env:
+  TF_VERSION: "1.7.0"
+  WORKING_DIR: "."
+
+jobs:
+  validate:
+    name: "Validate & Lint"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Terraform Init (validate only)
+        run: terraform init -backend=false
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Terraform Validate
+        run: terraform validate -no-color
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+      - run: tflint --init
+      - run: tflint --format compact --recursive
+
+      - uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: ${{ env.WORKING_DIR }}
+          framework: terraform
+          soft_fail: true
+          output_format: cli
+
+  plan:
+    name: "Terraform Plan"
+    runs-on: ubuntu-latest
+    needs: validate
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Set environment variables per environment
+      - name: Set DEV secrets
+        if: ${{ github.event.inputs.environment == 'dev' }}
+        run: |
+          echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_DEV }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET_DEV }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID_DEV }}" >> $GITHUB_ENV
+          echo "ARM_ACCESS_KEY=${{ secrets.TF_STATE_ACCESS_KEY_DEV }}" >> $GITHUB_ENV
+
+      - name: Set PROD secrets
+        if: ${{ github.event.inputs.environment == 'prod' }}
+        run: |
+          echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_PROD }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET_PROD }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID_PROD }}" >> $GITHUB_ENV
+          echo "ARM_ACCESS_KEY=${{ secrets.TF_STATE_ACCESS_KEY_PROD }}" >> $GITHUB_ENV
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan \
+            -var="environment=${{ github.event.inputs.environment }}" \
+            -out=tfplan-${{ github.event.inputs.environment }}
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ github.event.inputs.environment }}
+          path: tfplan-${{ github.event.inputs.environment }}
+          retention-days: 7
+
+      - name: Post Plan to PR
+        if: github.event_name == 'pull_request'
+        run: |
+          terraform show -no-color tfplan-${{ github.event.inputs.environment }} > plan.txt
+          PLAN_SUMMARY=$(head -n 30 plan.txt)
+          gh pr comment ${{ github.event.pull_request.number }} --body "#### Terraform Plan — ${{ github.event.inputs.environment }} 🔍\n\`\`\`\n$PLAN_SUMMARY\n...\`\`\`"
+
+  apply:
+    name: "Terraform Apply"
+    runs-on: ubuntu-latest
+    needs: plan
+    if: github.event.inputs.action == 'apply'
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Set environment variables per environment
+      - name: Set DEV secrets
+        if: ${{ github.event.inputs.environment == 'dev' }}
+        run: |
+          echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_DEV }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET_DEV }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID_DEV }}" >> $GITHUB_ENV
+          echo "ARM_ACCESS_KEY=${{ secrets.TF_STATE_ACCESS_KEY_DEV }}" >> $GITHUB_ENV
+
+      - name: Set PROD secrets
+        if: ${{ github.event.inputs.environment == 'prod' }}
+        run: |
+          echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_PROD }}" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET_PROD }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID_PROD }}" >> $GITHUB_ENV
+          echo "ARM_ACCESS_KEY=${{ secrets.TF_STATE_ACCESS_KEY_PROD }}" >> $GITHUB_ENV
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ github.event.inputs.environment }}
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan-${{ github.event.inputs.environment }}
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Terraform Output
+        run: terraform output -json > tf-outputs-${{ github.event.inputs.environment }}.json
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Upload Outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tf-outputs-${{ github.event.inputs.environment }}
+          path: tf-outputs-${{ github.event.inputs.environment }}.json
+          retention-days: 30

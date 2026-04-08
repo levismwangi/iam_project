@@ -1,0 +1,11 @@
+# terraform.tfvars — Copy this and fill in your real values
+# DO NOT commit this file to Git — it is in .gitignore
+
+tenant_id       = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+subscription_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+tenant_domain   = "contoso.onmicrosoft.com"
+company_name    = "contoso"
+environment     = "dev"
+location        = "eastus"
+alert_email     = "security@contoso.onmicrosoft.com"
+log_retention_days = 30
