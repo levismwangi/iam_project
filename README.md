@@ -1,6 +1,6 @@
 # Enterprise IAM Project — Microsoft Entra ID + Terraform
 
-A production-grade Identity and Access Management solution built on **Microsoft Entra ID**, fully provisioned via **Terraform IaC** with a **GitHub Actions CI/CD pipeline**.
+An Identity and Access Management solution built on **Microsoft Entra ID**, fully provisioned via **Terraform IaC** with a **GitHub Actions CI/CD pipeline**.
 
 ---
 
