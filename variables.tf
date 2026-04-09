@@ -114,6 +114,7 @@ variable "applications" {
   }
 }
 
+/*
 # PIM
 variable "pim_eligible_assignments" {
   description = "Map of PIM eligible role assignments"
@@ -139,7 +140,7 @@ variable "pim_eligible_assignments" {
   }
 }
 
-
+*/
 # Monitoring
 variable "alert_email" {
   description = "Email address for security alert notifications"
