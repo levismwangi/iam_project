@@ -19,3 +19,5 @@ variable "tenant_domain" {
   description = "Primary tenant domain e.g. contoso.onmicrosoft.com"
   type        = string
 }
+
+
