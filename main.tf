@@ -70,6 +70,7 @@ module "app_registrations" {
 }
 
 
+/*
 # Module: PIM
 module "pim" {
   source = "./modules/pim"
@@ -77,6 +78,7 @@ module "pim" {
   pim_eligible_assignments = var.pim_eligible_assignments
   user_objects             = module.users.user_objects
 }
+*/
 
 # Module: Monitoring
 module "monitoring" {
