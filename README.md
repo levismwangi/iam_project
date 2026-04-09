@@ -1,6 +1,6 @@
 # Enterprise IAM Project — Microsoft Entra ID + Terraform
 
-A production-grade Identity and Access Management solution built on **Microsoft Entra ID**, fully provisioned via **Terraform IaC** with a **GitHub Actions CI/CD pipeline**.
+An Identity and Access Management solution built on **Microsoft Entra ID**, fully provisioned via **Terraform IaC** with a **GitHub Actions CI/CD pipeline**.
 
 ---
 
@@ -67,18 +67,19 @@ iam-project/
 
 ## Prerequisites
 
-| Tool | Version | Purpose |
-|------|---------|---------|
-| Terraform CLI | >= 1.6.0 | IaC engine |
-| Azure CLI | Latest | Authentication |
-| Git | Any | Version control |
-| VS Code + HCL extension | Any | IDE |
+| Tool                    | Version  | Purpose         |
+| ----------------------- | -------- | --------------- |
+| Terraform CLI           | >= 1.6.0 | IaC engine      |
+| Azure CLI               | Latest   | Authentication  |
+| Git                     | Any      | Version control |
+| VS Code + HCL extension | Any      | IDE             |
 
 ---
 
 ## Initial Setup
 
 ### 1. Create a Microsoft 365 Developer Tenant
+
 Sign up at [developer.microsoft.com/microsoft-365/dev-program](https://developer.microsoft.com/microsoft-365/dev-program) — free 90-day renewable sandbox.
 
 ### 2. Create a Service Principal for Terraform
@@ -94,13 +95,13 @@ az ad sp create-for-rbac \
 
 Grant the SP these **Microsoft Graph API permissions** (App registrations → API permissions → Grant admin consent):
 
-| Permission | Purpose |
-|---|---|
-| `Application.ReadWrite.All` | Create/manage app registrations owned by this SP |
-| `Directory.ReadWrite.All` | Manage users, groups, and directory objects |
-| `Policy.ReadWrite.ConditionalAccess` | Create and update CA policies |
-| `RoleManagement.ReadWrite.Directory` | Assign Entra ID roles |
-| `PrivilegedAccess.ReadWrite.AzureAD` | Configure PIM policies and assignments |
+| Permission                           | Purpose                                          |
+| ------------------------------------ | ------------------------------------------------ |
+| `Application.ReadWrite.All`          | Create/manage app registrations owned by this SP |
+| `Directory.ReadWrite.All`            | Manage users, groups, and directory objects      |
+| `Policy.ReadWrite.ConditionalAccess` | Create and update CA policies                    |
+| `RoleManagement.ReadWrite.Directory` | Assign Entra ID roles                            |
+| `PrivilegedAccess.ReadWrite.AzureAD` | Configure PIM policies and assignments           |
 
 > **Important:** All Graph API permissions require **admin consent** — granting the permission alone is not sufficient. Without consent, Terraform apply will fail with `Authorization_RequestDenied (403)`.
 
@@ -123,11 +124,11 @@ az ad app federated-credential create --id <APP_CLIENT_ID> --parameters github-p
 
 Each credential maps to a different pipeline trigger:
 
-| Credential | Subject | Covers |
-|---|---|---|
-| `github-main` | `repo:<org>/<repo>:ref:refs/heads/main` | Push to main |
-| `github-env-dev` | `repo:<org>/<repo>:environment:dev` | `workflow_dispatch` targeting dev |
-| `github-pr` | `repo:<org>/<repo>:pull_request` | Pull requests |
+| Credential       | Subject                                 | Covers                            |
+| ---------------- | --------------------------------------- | --------------------------------- |
+| `github-main`    | `repo:<org>/<repo>:ref:refs/heads/main` | Push to main                      |
+| `github-env-dev` | `repo:<org>/<repo>:environment:dev`     | `workflow_dispatch` targeting dev |
+| `github-pr`      | `repo:<org>/<repo>:pull_request`        | Pull requests                     |
 
 > Use the exact GitHub repo name (case-sensitive). If OIDC auth fails, check the `Azure Login` step logs — line 20 shows the exact subject string GitHub is sending.
 
@@ -193,28 +194,28 @@ terraform apply
 
 The GitHub Actions pipeline (`.github/workflows/terraform.yml`) has 3 jobs:
 
-| Job | Trigger | What it does |
-|-----|---------|-------------|
-| `validate` | Every push/PR | `fmt` check, `validate`, TFLint, Checkov security scan |
-| `plan` | Every push/PR + manual dispatch | Plans against target environment, posts diff as PR comment |
-| `apply` | Manual dispatch (`action=apply`) | Applies the saved plan after environment approval gate |
+| Job        | Trigger                          | What it does                                               |
+| ---------- | -------------------------------- | ---------------------------------------------------------- |
+| `validate` | Every push/PR                    | `fmt` check, `validate`, TFLint, Checkov security scan     |
+| `plan`     | Every push/PR + manual dispatch  | Plans against target environment, posts diff as PR comment |
+| `apply`    | Manual dispatch (`action=apply`) | Applies the saved plan after environment approval gate     |
 
 The pipeline supports two environments (`dev` / `prod`) selected at dispatch time, each using its own federated credential and set of GitHub secrets.
 
 ### Required GitHub Secrets
 
-| Secret | Description |
-|--------|-------------|
-| `AZURE_CLIENT_ID_DEV` | App registration client ID (DEV) |
-| `AZURE_SUBSCRIPTION_ID_DEV` | Subscription ID (DEV) |
-| `AZURE_TENANT_ID_DEV` | Tenant ID (DEV) |
-| `AZURE_TENANT_DOMAIN_DEV` | e.g. `contoso.onmicrosoft.com` (DEV) |
-| `TF_STATE_ACCESS_KEY_DEV` | Storage account access key for state (DEV) |
-| `AZURE_CLIENT_ID_PROD` | App registration client ID (PROD) |
-| `AZURE_SUBSCRIPTION_ID_PROD` | Subscription ID (PROD) |
-| `AZURE_TENANT_ID_PROD` | Tenant ID (PROD) |
-| `AZURE_TENANT_DOMAIN_PROD` | e.g. `contoso.onmicrosoft.com` (PROD) |
-| `TF_STATE_ACCESS_KEY_PROD` | Storage account access key for state (PROD) |
+| Secret                       | Description                                 |
+| ---------------------------- | ------------------------------------------- |
+| `AZURE_CLIENT_ID_DEV`        | App registration client ID (DEV)            |
+| `AZURE_SUBSCRIPTION_ID_DEV`  | Subscription ID (DEV)                       |
+| `AZURE_TENANT_ID_DEV`        | Tenant ID (DEV)                             |
+| `AZURE_TENANT_DOMAIN_DEV`    | e.g. `contoso.onmicrosoft.com` (DEV)        |
+| `TF_STATE_ACCESS_KEY_DEV`    | Storage account access key for state (DEV)  |
+| `AZURE_CLIENT_ID_PROD`       | App registration client ID (PROD)           |
+| `AZURE_SUBSCRIPTION_ID_PROD` | Subscription ID (PROD)                      |
+| `AZURE_TENANT_ID_PROD`       | Tenant ID (PROD)                            |
+| `AZURE_TENANT_DOMAIN_PROD`   | e.g. `contoso.onmicrosoft.com` (PROD)       |
+| `TF_STATE_ACCESS_KEY_PROD`   | Storage account access key for state (PROD) |
 
 > `AZURE_CLIENT_SECRET` is intentionally absent — OIDC eliminates the need for it.
 
@@ -222,31 +223,31 @@ The pipeline supports two environments (`dev` / `prod`) selected at dispatch tim
 
 ## Security Design Decisions
 
-| Decision | Rationale |
-|----------|-----------|
-| OIDC instead of client secrets | Short-lived tokens — no long-lived credentials stored in GitHub |
-| CA policies start in report-only mode in `dev` | Prevents accidental lockout during testing |
-| Break-glass group excluded from all CA policies | Ensures emergency access is always available |
-| PIM requires MFA + justification on activation | Eliminates standing privileged access |
-| App implicit grant disabled | Forces auth code + PKCE — more secure |
-| `app_role_assignment_required = true` on SPs | Users cannot self-assign to apps |
-| Remote state in Azure Storage | State is encrypted at rest, not stored in Git |
-| `terraform.tfvars` in `.gitignore` | Prevents credentials leaking to Git |
-| Key Vault Secrets User (not Owner) on SP | Least-privilege — read-only access to secrets |
+| Decision                                        | Rationale                                                       |
+| ----------------------------------------------- | --------------------------------------------------------------- |
+| OIDC instead of client secrets                  | Short-lived tokens — no long-lived credentials stored in GitHub |
+| CA policies start in report-only mode in `dev`  | Prevents accidental lockout during testing                      |
+| Break-glass group excluded from all CA policies | Ensures emergency access is always available                    |
+| PIM requires MFA + justification on activation  | Eliminates standing privileged access                           |
+| App implicit grant disabled                     | Forces auth code + PKCE — more secure                           |
+| `app_role_assignment_required = true` on SPs    | Users cannot self-assign to apps                                |
+| Remote state in Azure Storage                   | State is encrypted at rest, not stored in Git                   |
+| `terraform.tfvars` in `.gitignore`              | Prevents credentials leaking to Git                             |
+| Key Vault Secrets User (not Owner) on SP        | Least-privilege — read-only access to secrets                   |
 
 ---
 
 ## Monitoring — Alert Summary
 
-| Alert | Severity | Detection Window |
-|-------|----------|-----------------|
-| New admin role assignment | Medium | Immediate |
-| Bulk user deletion (3+) | High | 5 min |
-| CA policy modified/deleted | Medium | Immediate |
-| Sign-in from risky location | Low | 15 min |
-| New MFA method registered | Low | Immediate |
-| PIM activation outside hours | Medium | Immediate |
-| Impossible travel | High | 1 hr (Sentinel) |
+| Alert                        | Severity | Detection Window |
+| ---------------------------- | -------- | ---------------- |
+| New admin role assignment    | Medium   | Immediate        |
+| Bulk user deletion (3+)      | High     | 5 min            |
+| CA policy modified/deleted   | Medium   | Immediate        |
+| Sign-in from risky location  | Low      | 15 min           |
+| New MFA method registered    | Low      | Immediate        |
+| PIM activation outside hours | Medium   | Immediate        |
+| Impossible travel            | High     | 1 hr (Sentinel)  |
 
 ---
 
