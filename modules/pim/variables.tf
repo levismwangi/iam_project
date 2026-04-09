@@ -1,3 +1,4 @@
+/*
 variable "pim_eligible_assignments" {
   description = "Map of PIM eligible role assignments"
   type = map(object({
@@ -12,3 +13,5 @@ variable "user_objects" {
   description = "Full user objects from the users module"
   type        = any
 }
+
+*/
