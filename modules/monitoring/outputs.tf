@@ -16,11 +16,11 @@ output "action_group_id" {
 output "alert_rule_ids" {
   description = "Map of alert rule names to resource IDs"
   value = {
-    new_admin_role_assignment  = azurerm_monitor_scheduled_query_rules_alert_v2.new_admin_role.id
-    bulk_user_deletion         = azurerm_monitor_scheduled_query_rules_alert_v2.bulk_user_deletion.id
-    ca_policy_change           = azurerm_monitor_scheduled_query_rules_alert_v2.ca_policy_change.id
+    new_admin_role_assignment = azurerm_monitor_scheduled_query_rules_alert_v2.new_admin_role.id
+    bulk_user_deletion        = azurerm_monitor_scheduled_query_rules_alert_v2.bulk_user_deletion.id
+    ca_policy_change          = azurerm_monitor_scheduled_query_rules_alert_v2.ca_policy_change.id
     //signin_outside_trusted     = azurerm_monitor_scheduled_query_rules_alert_v2.signin_outside_trusted.id
-    mfa_registration           = azurerm_monitor_scheduled_query_rules_alert_v2.mfa_registration.id
+    mfa_registration = azurerm_monitor_scheduled_query_rules_alert_v2.mfa_registration.id
     //pim_outside_hours          = azurerm_monitor_scheduled_query_rules_alert_v2.pim_outside_hours.id
   }
 }

@@ -5,11 +5,11 @@
 resource "azuread_group" "dept" {
   for_each = toset(var.departments)
 
-  display_name            = "grp-${lower(var.company_name)}-${lower(each.key)}"
-  description             = "Security group for ${each.key} department"
-  security_enabled        = true
-  mail_enabled            = false
-  assignable_to_role      = false
+  display_name       = "grp-${lower(var.company_name)}-${lower(each.key)}"
+  description        = "Security group for ${each.key} department"
+  security_enabled   = true
+  mail_enabled       = false
+  assignable_to_role = false
 
   # Dynamically assign users whose department matches this group
   members = [

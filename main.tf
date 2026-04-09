@@ -19,7 +19,7 @@ resource "azurerm_resource_group" "iam" {
 
 # Module: Users
 module "users" {
-  source = "./modules/users"
+  source        = "./modules/users"
   users         = var.users
   tenant_domain = var.tenant_domain
   temp_password = data.azurerm_key_vault_secret.temp_password.value
