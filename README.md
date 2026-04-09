@@ -119,7 +119,7 @@ If you already have an Azure account, activate the Entra ID P2 trial directly.
 
 ---
 
-#### Option C — Visual Studio Subscription (if you have one)
+#### Option D — Visual Studio Subscription (if you have one)
 If you have a Visual Studio Professional or Enterprise subscription, it includes Azure credits and access to Microsoft 365 developer tools.
 
 1. Go to [my.visualstudio.com](https://my.visualstudio.com)
