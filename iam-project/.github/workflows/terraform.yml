@@ -36,6 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
@@ -55,7 +56,9 @@ jobs:
       - uses: terraform-linters/setup-tflint@v4
         with:
           tflint_version: latest
+
       - run: tflint --init
+
       - run: tflint --format compact --recursive
 
       - uses: bridgecrewio/checkov-action@v12
@@ -72,13 +75,13 @@ jobs:
     environment: ${{ github.event.inputs.environment || 'dev' }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      # Set environment variables per environment
       - name: Set DEV secrets
-        if: ${{ github.event.inputs.environment == 'dev' }}
+        if: ${{ github.event.inputs.environment != 'prod' }}
         run: |
           echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_DEV }}" >> $GITHUB_ENV
           echo "ARM_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET_DEV }}" >> $GITHUB_ENV
@@ -103,23 +106,23 @@ jobs:
         id: plan
         run: |
           terraform plan \
-            -var="environment=${{ github.event.inputs.environment }}" \
-            -out=tfplan-${{ github.event.inputs.environment }}
+            -var="environment=${{ github.event.inputs.environment || 'dev' }}" \
+            -out=tfplan-${{ github.event.inputs.environment || 'dev' }}
         working-directory: ${{ env.WORKING_DIR }}
 
       - name: Upload Plan Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tfplan-${{ github.event.inputs.environment }}
-          path: tfplan-${{ github.event.inputs.environment }}
+          name: tfplan-${{ github.event.inputs.environment || 'dev' }}
+          path: tfplan-${{ github.event.inputs.environment || 'dev' }}
           retention-days: 7
 
       - name: Post Plan to PR
         if: github.event_name == 'pull_request'
         run: |
-          terraform show -no-color tfplan-${{ github.event.inputs.environment }} > plan.txt
+          terraform show -no-color tfplan-${{ github.event.inputs.environment || 'dev' }} > plan.txt
           PLAN_SUMMARY=$(head -n 30 plan.txt)
-          gh pr comment ${{ github.event.pull_request.number }} --body "#### Terraform Plan — ${{ github.event.inputs.environment }} 🔍\n\`\`\`\n$PLAN_SUMMARY\n...\`\`\`"
+          gh pr comment ${{ github.event.pull_request.number }} --body "#### Terraform Plan — ${{ github.event.inputs.environment || 'dev' }} 🔍\n\`\`\`\n$PLAN_SUMMARY\n...\`\`\`"
 
   apply:
     name: "Terraform Apply"
@@ -129,13 +132,13 @@ jobs:
     environment: ${{ github.event.inputs.environment || 'dev' }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      # Set environment variables per environment
       - name: Set DEV secrets
-        if: ${{ github.event.inputs.environment == 'dev' }}
+        if: ${{ github.event.inputs.environment != 'prod' }}
         run: |
           echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_DEV }}" >> $GITHUB_ENV
           echo "ARM_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET_DEV }}" >> $GITHUB_ENV
@@ -159,19 +162,19 @@ jobs:
       - name: Download Plan Artifact
         uses: actions/download-artifact@v4
         with:
-          name: tfplan-${{ github.event.inputs.environment }}
+          name: tfplan-${{ github.event.inputs.environment || 'dev' }}
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan-${{ github.event.inputs.environment }}
+        run: terraform apply -auto-approve tfplan-${{ github.event.inputs.environment || 'dev' }}
         working-directory: ${{ env.WORKING_DIR }}
 
       - name: Terraform Output
-        run: terraform output -json > tf-outputs-${{ github.event.inputs.environment }}.json
+        run: terraform output -json > tf-outputs-${{ github.event.inputs.environment || 'dev' }}.json
         working-directory: ${{ env.WORKING_DIR }}
 
       - name: Upload Outputs
         uses: actions/upload-artifact@v4
         with:
-          name: tf-outputs-${{ github.event.inputs.environment }}
-          path: tf-outputs-${{ github.event.inputs.environment }}.json
+          name: tf-outputs-${{ github.event.inputs.environment || 'dev' }}
+          path: tf-outputs-${{ github.event.inputs.environment || 'dev' }}.json
           retention-days: 30
