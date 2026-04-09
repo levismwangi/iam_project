@@ -169,7 +169,7 @@ Assign via Portal: **Entra ID → Roles and administrators → search role → A
 
 ```bash
 # Create resource group for state
-az group create --name rg-terraform-state --location eastus
+az group create --name rg-terraform-state --location southafricanorth
 
 # Create storage account (must be globally unique)
 az storage account create \
