@@ -73,6 +73,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    # OIDC: Required permissions to request a JWT from GitHub's OIDC provider
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write  # needed for PR comments
+
     steps:
       - uses: actions/checkout@v4
 
@@ -80,23 +87,48 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Set DEV secrets
-        if: ${{ github.event.inputs.environment != 'prod' }}
+      # OIDC DEV: Federates with Azure using a short-lived token — no client secret needed
+      - name: Azure Login (DEV)
+        if: ${{ (github.event.inputs.environment || 'dev') != 'prod' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_DEV }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID_DEV }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}
+
+      # OIDC PROD: Same flow, different federated credential
+      - name: Azure Login (PROD)
+        if: ${{ github.event.inputs.environment == 'prod' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_PROD }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID_PROD }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}
+
+      # Pass ARM env vars so Terraform knows to use OIDC
+      - name: Set Terraform ARM env vars (DEV)
+        if: ${{ (github.event.inputs.environment || 'dev') != 'prod' }}
         run: |
           echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_DEV }}" >> $GITHUB_ENV
-          echo "ARM_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET_DEV }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID_DEV }}" >> $GITHUB_ENV
           echo "ARM_ACCESS_KEY=${{ secrets.TF_STATE_ACCESS_KEY_DEV }}" >> $GITHUB_ENV
+          echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
+          echo "TF_VAR_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
+          echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_DEV }}" >> $GITHUB_ENV
+          echo "TF_VAR_tenant_domain=${{ secrets.AZURE_TENANT_DOMAIN_DEV }}" >> $GITHUB_ENV
 
-      - name: Set PROD secrets
+      - name: Set Terraform ARM env vars (PROD)
         if: ${{ github.event.inputs.environment == 'prod' }}
         run: |
           echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_PROD }}" >> $GITHUB_ENV
-          echo "ARM_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET_PROD }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID_PROD }}" >> $GITHUB_ENV
           echo "ARM_ACCESS_KEY=${{ secrets.TF_STATE_ACCESS_KEY_PROD }}" >> $GITHUB_ENV
+          echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
+          echo "TF_VAR_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
+          echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_PROD }}" >> $GITHUB_ENV
+          echo "TF_VAR_tenant_domain=${{ secrets.AZURE_TENANT_DOMAIN_PROD }}" >> $GITHUB_ENV
 
       - name: Terraform Init
         run: terraform init
@@ -107,9 +139,6 @@ jobs:
         run: |
           terraform plan \
             -var="environment=${{ github.event.inputs.environment || 'dev' }}" \
-            -var="subscription_id=${{ github.event.inputs.environment == 'prod' && secrets.AZURE_SUBSCRIPTION_ID_PROD || secrets.AZURE_SUBSCRIPTION_ID_DEV }}" \
-            -var="tenant_id=${{ github.event.inputs.environment == 'prod' && secrets.AZURE_TENANT_ID_PROD || secrets.AZURE_TENANT_ID_DEV }}" \
-            -var="tenant_domain=${{ github.event.inputs.environment == 'prod' && secrets.AZURE_TENANT_DOMAIN_PROD || secrets.AZURE_TENANT_DOMAIN_DEV }}" \
             -out=tfplan-${{ github.event.inputs.environment || 'dev' }}
         working-directory: ${{ env.WORKING_DIR }}
 
@@ -122,10 +151,16 @@ jobs:
 
       - name: Post Plan to PR
         if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           terraform show -no-color tfplan-${{ github.event.inputs.environment || 'dev' }} > plan.txt
           PLAN_SUMMARY=$(head -n 30 plan.txt)
-          gh pr comment ${{ github.event.pull_request.number }} --body "#### Terraform Plan — ${{ github.event.inputs.environment || 'dev' }} 🔍\n\`\`\`\n$PLAN_SUMMARY\n...\`\`\`"
+          gh pr comment ${{ github.event.pull_request.number }} --body "#### Terraform Plan — ${{ github.event.inputs.environment || 'dev' }} 🔍
+          \`\`\`
+          $PLAN_SUMMARY
+          ...
+          \`\`\`"
 
   apply:
     name: "Terraform Apply"
@@ -133,6 +168,12 @@ jobs:
     needs: plan
     if: github.event.inputs.action == 'apply'
     environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    # OIDC: Same permissions required in apply job
+    permissions:
+      id-token: write
+      contents: read
+
     steps:
       - uses: actions/checkout@v4
 
@@ -140,23 +181,45 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Set DEV secrets
-        if: ${{ github.event.inputs.environment != 'prod' }}
+      - name: Azure Login (DEV)
+        if: ${{ (github.event.inputs.environment || 'dev') != 'prod' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_DEV }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID_DEV }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}
+
+      - name: Azure Login (PROD)
+        if: ${{ github.event.inputs.environment == 'prod' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_PROD }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID_PROD }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}
+
+      - name: Set Terraform ARM env vars (DEV)
+        if: ${{ (github.event.inputs.environment || 'dev') != 'prod' }}
         run: |
           echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_DEV }}" >> $GITHUB_ENV
-          echo "ARM_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET_DEV }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID_DEV }}" >> $GITHUB_ENV
           echo "ARM_ACCESS_KEY=${{ secrets.TF_STATE_ACCESS_KEY_DEV }}" >> $GITHUB_ENV
+          echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
+          echo "TF_VAR_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
+          echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_DEV }}" >> $GITHUB_ENV
+          echo "TF_VAR_tenant_domain=${{ secrets.AZURE_TENANT_DOMAIN_DEV }}" >> $GITHUB_ENV
 
-      - name: Set PROD secrets
+      - name: Set Terraform ARM env vars (PROD)
         if: ${{ github.event.inputs.environment == 'prod' }}
         run: |
           echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_PROD }}" >> $GITHUB_ENV
-          echo "ARM_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET_PROD }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID_PROD }}" >> $GITHUB_ENV
           echo "ARM_ACCESS_KEY=${{ secrets.TF_STATE_ACCESS_KEY_PROD }}" >> $GITHUB_ENV
+          echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
+          echo "TF_VAR_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
+          echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_PROD }}" >> $GITHUB_ENV
+          echo "TF_VAR_tenant_domain=${{ secrets.AZURE_TENANT_DOMAIN_PROD }}" >> $GITHUB_ENV
 
       - name: Terraform Init
         run: terraform init
@@ -166,6 +229,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: tfplan-${{ github.event.inputs.environment || 'dev' }}
+          path: ${{ env.WORKING_DIR }}
 
       - name: Terraform Apply
         run: terraform apply -auto-approve tfplan-${{ github.event.inputs.environment || 'dev' }}
