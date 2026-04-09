@@ -7,14 +7,6 @@
 # Look up available directory role definitions
 data "azuread_directory_role_templates" "all" {}
 
-locals {
-  # Build a lookup: role display name -> template ID
-  role_template_map = {
-    for t in data.azuread_directory_role_templates.all.role_templates :
-    t.display_name => t.object_id
-  }
-}
-
 # Activate the directory roles so we can assign them
 resource "azuread_directory_role" "pim_roles" {
   for_each     = toset([for v in var.pim_eligible_assignments : v.role_display_name])
@@ -50,3 +42,13 @@ resource "azuread_directory_role_eligibility_schedule_request" "this" {
 
 
 */
+
+terraform {
+  required_version = ">= 1.6.0"
+  required_providers {
+    azuread = {
+      source  = "hashicorp/azuread"
+      version = "~> 2.47"
+    }
+  }
+}
