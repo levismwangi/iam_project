@@ -84,45 +84,44 @@ Sign up at [developer.microsoft.com/microsoft-365/dev-program](https://developer
 ### 2. Create a Service Principal for Terraform
 
 ```bash
-# Login to Azure CLI
 az login --tenant <your-tenant-id>
 
-# Create service principal with required permissions
 az ad sp create-for-rbac \
   --name "sp-terraform-iam" \
   --role "Contributor" \
   --scopes "/subscriptions/<subscription-id>"
 ```
 
-Then grant the service principal these **Entra ID API permissions** (App registrations → API permissions):
-- `Directory.ReadWrite.All`
-- `Policy.ReadWrite.ConditionalAccess`
-- `RoleManagement.ReadWrite.Directory`
-- `PrivilegedAccess.ReadWrite.AzureAD`
+Grant the SP these **Microsoft Graph API permissions** (App registrations → API permissions → Grant admin consent):
+
+| Permission | Purpose |
+|---|---|
+| `Application.ReadWrite.OwnedBy` | Create/manage app registrations owned by this SP |
+| `Directory.ReadWrite.All` | Manage users, groups, and directory objects |
+| `Policy.ReadWrite.ConditionalAccess` | Create and update CA policies |
+| `RoleManagement.ReadWrite.Directory` | Assign Entra ID roles |
+| `PrivilegedAccess.ReadWrite.AzureAD` | Configure PIM policies and assignments |
+
+> **Important:** All Graph API permissions require **admin consent** — granting the permission alone is not sufficient. Without consent, Terraform apply will fail with `Authorization_RequestDenied (403)`.
 
 ### 3. Configure OIDC Federated Identity (No Client Secrets)
 
-This project uses **OIDC (Workload Identity Federation)** instead of long-lived client secrets. GitHub exchanges a short-lived JWT with Azure on every run — nothing sensitive is stored.
+This project uses **OIDC (Workload Identity Federation)** — GitHub exchanges a short-lived JWT with Azure on every run. No client secrets are stored anywhere.
 
-#### Create federated credentials for your app registration
-
-Use JSON files to avoid PowerShell quoting issues:
+#### Create federated credentials
 
 ```powershell
-# Create JSON files
+# Create JSON files (avoids PowerShell quoting issues)
 '{"name":"github-main","issuer":"https://token.actions.githubusercontent.com","subject":"repo:<org>/<repo>:ref:refs/heads/main","audiences":["api://AzureADTokenExchange"]}' | Out-File github-main.json
 '{"name":"github-env-dev","issuer":"https://token.actions.githubusercontent.com","subject":"repo:<org>/<repo>:environment:dev","audiences":["api://AzureADTokenExchange"]}' | Out-File github-env-dev.json
 '{"name":"github-pr","issuer":"https://token.actions.githubusercontent.com","subject":"repo:<org>/<repo>:pull_request","audiences":["api://AzureADTokenExchange"]}' | Out-File github-pr.json
 
-# Register them
 az ad app federated-credential create --id <APP_CLIENT_ID> --parameters github-main.json
 az ad app federated-credential create --id <APP_CLIENT_ID> --parameters github-env-dev.json
 az ad app federated-credential create --id <APP_CLIENT_ID> --parameters github-pr.json
 ```
 
-> **Important:** Use the exact GitHub repo name (case-sensitive) in the subject claim. You can verify what subject GitHub sends by checking the `Azure Login` step logs in a failed run — line 20 shows the exact subject string.
-
-Each subject covers a different trigger type:
+Each credential maps to a different pipeline trigger:
 
 | Credential | Subject | Covers |
 |---|---|---|
@@ -130,7 +129,9 @@ Each subject covers a different trigger type:
 | `github-env-dev` | `repo:<org>/<repo>:environment:dev` | `workflow_dispatch` targeting dev |
 | `github-pr` | `repo:<org>/<repo>:pull_request` | Pull requests |
 
-#### Configure providers.tf to use OIDC
+> Use the exact GitHub repo name (case-sensitive). If OIDC auth fails, check the `Azure Login` step logs — line 20 shows the exact subject string GitHub is sending.
+
+#### Configure providers.tf
 
 ```hcl
 provider "azurerm" {
@@ -145,8 +146,6 @@ provider "azuread" {
 
 ### 4. Grant Key Vault Access to the Service Principal
 
-The SP needs permission to read secrets from Key Vault at plan/apply time:
-
 ```bash
 az role assignment create \
   --role "Key Vault Secrets User" \
@@ -154,22 +153,19 @@ az role assignment create \
   --scope "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RG_NAME>/providers/Microsoft.KeyVault/vaults/<VAULT_NAME>"
 ```
 
-> Role assignments can take 1–2 minutes to propagate in Azure. Wait before re-running the pipeline if you get a 403 immediately after granting access.
+> Role assignments can take 1–2 minutes to propagate. If you see a 403 immediately after granting access, wait and re-run.
 
 ### 5. Create Terraform Remote State Storage
 
 ```bash
-# Create resource group for state
 az group create --name rg-terraform-state --location eastus
 
-# Create storage account
 az storage account create \
   --name tfstateiam \
   --resource-group rg-terraform-state \
   --sku Standard_LRS \
   --encryption-services blob
 
-# Create container
 az storage container create \
   --name tfstate \
   --account-name tfstateiam
@@ -179,7 +175,7 @@ az storage container create \
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your real tenant values
+# Edit terraform.tfvars with your tenant values
 ```
 
 ### 7. Deploy
@@ -195,29 +191,29 @@ terraform apply
 
 ## CI/CD Pipeline
 
-The GitHub Actions pipeline has 3 jobs:
+The GitHub Actions pipeline (`.github/workflows/terraform.yml`) has 3 jobs:
 
 | Job | Trigger | What it does |
 |-----|---------|-------------|
-| `validate` | Every push/PR | fmt check, validate, TFLint, Checkov |
-| `plan` | Every push/PR + manual dispatch | Plans against target environment, posts diff to PR |
-| `apply` | Manual dispatch (`action=apply`) | Applies the saved plan after environment approval |
+| `validate` | Every push/PR | `fmt` check, `validate`, TFLint, Checkov security scan |
+| `plan` | Every push/PR + manual dispatch | Plans against target environment, posts diff as PR comment |
+| `apply` | Manual dispatch (`action=apply`) | Applies the saved plan after environment approval gate |
+
+The pipeline supports two environments (`dev` / `prod`) selected at dispatch time, each using its own federated credential and set of GitHub secrets.
 
 ### Required GitHub Secrets
-
-No client secrets are stored — OIDC is used for Azure authentication.
 
 | Secret | Description |
 |--------|-------------|
 | `AZURE_CLIENT_ID_DEV` | App registration client ID (DEV) |
 | `AZURE_SUBSCRIPTION_ID_DEV` | Subscription ID (DEV) |
 | `AZURE_TENANT_ID_DEV` | Tenant ID (DEV) |
-| `AZURE_TENANT_DOMAIN_DEV` | e.g. contoso.onmicrosoft.com (DEV) |
+| `AZURE_TENANT_DOMAIN_DEV` | e.g. `contoso.onmicrosoft.com` (DEV) |
 | `TF_STATE_ACCESS_KEY_DEV` | Storage account access key for state (DEV) |
 | `AZURE_CLIENT_ID_PROD` | App registration client ID (PROD) |
 | `AZURE_SUBSCRIPTION_ID_PROD` | Subscription ID (PROD) |
 | `AZURE_TENANT_ID_PROD` | Tenant ID (PROD) |
-| `AZURE_TENANT_DOMAIN_PROD` | e.g. contoso.onmicrosoft.com (PROD) |
+| `AZURE_TENANT_DOMAIN_PROD` | e.g. `contoso.onmicrosoft.com` (PROD) |
 | `TF_STATE_ACCESS_KEY_PROD` | Storage account access key for state (PROD) |
 
 > `AZURE_CLIENT_SECRET` is intentionally absent — OIDC eliminates the need for it.
@@ -242,15 +238,15 @@ No client secrets are stored — OIDC is used for Azure authentication.
 
 ## Monitoring — Alert Summary
 
-| Alert | Severity | Detection |
-|-------|----------|-----------|
+| Alert | Severity | Detection Window |
+|-------|----------|-----------------|
 | New admin role assignment | Medium | Immediate |
-| Bulk user deletion (3+) | High | 5 min window |
+| Bulk user deletion (3+) | High | 5 min |
 | CA policy modified/deleted | Medium | Immediate |
-| Sign-in from risky location | Low | 15 min window |
+| Sign-in from risky location | Low | 15 min |
 | New MFA method registered | Low | Immediate |
 | PIM activation outside hours | Medium | Immediate |
-| Impossible travel | High | 1 hr window (Sentinel) |
+| Impossible travel | High | 1 hr (Sentinel) |
 
 ---
 
