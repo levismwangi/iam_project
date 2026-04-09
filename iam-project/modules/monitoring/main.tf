@@ -1,7 +1,7 @@
 # modules/monitoring/main.tf
 # Log Analytics + Sentinel + Alert Rules for IAM threat detection
 
-# Log Analytics Workspace — central repository for logs and analytics
+# Log Analytics Workspace
 resource "azurerm_log_analytics_workspace" "this" {
   name                = "law-${var.resource_prefix}-iam"
   location            = var.location
@@ -15,45 +15,76 @@ resource "azurerm_log_analytics_workspace" "this" {
   }
 }
 
+
 # Microsoft Sentinel — enabled on top of Log Analytics
 resource "azurerm_sentinel_log_analytics_workspace_onboarding" "this" {
   workspace_id = azurerm_log_analytics_workspace.this.id
 }
 
+
 # Entra ID Diagnostic Settings → Log Analytics
-# Streams audit logs and sign-in logs into the workspace for alerting and Sentinel analytics
+# Streams audit logs and sign-in logs into the workspace
 resource "azurerm_monitor_aad_diagnostic_setting" "this" {
   name                       = "diag-${var.resource_prefix}-entra-to-law"
   log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
 
   enabled_log {
     category = "AuditLogs"
+    retention_policy {
+      enabled = false
+      days    = 0
+    }
   }
 
   enabled_log {
     category = "SignInLogs"
+    retention_policy {
+      enabled = false
+      days    = 0
+    }
   }
 
   enabled_log {
     category = "NonInteractiveUserSignInLogs"
+    retention_policy {
+      enabled = false
+      days    = 0
+    }
   }
 
   enabled_log {
     category = "ServicePrincipalSignInLogs"
+    retention_policy {
+      enabled = false
+      days    = 0
+    }
   }
 
   enabled_log {
     category = "ManagedIdentitySignInLogs"
+    retention_policy {
+      enabled = false
+      days    = 0
+    }
   }
 
   enabled_log {
     category = "RiskyUsers"
+    retention_policy {
+      enabled = false
+      days    = 0
+    }
   }
 
   enabled_log {
     category = "UserRiskEvents"
+    retention_policy {
+      enabled = false
+      days    = 0
+    }
   }
 }
+
 
 # Action Group — where alerts get sent
 resource "azurerm_monitor_action_group" "iam_security" {
@@ -217,6 +248,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ca_policy_change" {
 }
 
 
+/*
 # ALERT 4 — Sign-in from Outside Trusted Locations
 # Detects: User signing in from an unexpected geography
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "signin_outside_trusted" {
@@ -231,6 +263,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "signin_outside_truste
   window_duration      = "PT15M"
 
   scopes = [azurerm_log_analytics_workspace.this.id]
+  depends_on = [azurerm_monitor_aad_diagnostic_setting.this]
 
   criteria {
     query = <<-KQL
@@ -264,6 +297,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "signin_outside_truste
   }
 }
 
+*/
 # ALERT 5 — MFA Registration by New User
 # Detects: A new MFA method registered — useful for detecting account takeover
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "mfa_registration" {
@@ -308,7 +342,6 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "mfa_registration" {
     alert_type = "mfa"
   }
 }
-
 
 # ALERT 6 — PIM Role Activated Outside Business Hours
 # Detects: Privileged role activated at unusual time — potential compromise
@@ -358,9 +391,11 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "pim_outside_hours" {
 }
 
 
+/*
+
 # Sentinel Analytics Rule — Impossible Travel
 # Detects: Same user signing in from two geographically distant locations
-# within a short time window — strong indicator of compromise
+# within a short time window
 resource "azurerm_sentinel_alert_rule_scheduled" "impossible_travel" {
   name                       = "sentinel-${var.resource_prefix}-impossible-travel"
   log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
@@ -372,6 +407,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "impossible_travel" {
   query_period               = "PT1H"
   trigger_operator           = "GreaterThan"
   trigger_threshold          = 0
+  depends_on = [azurerm_monitor_aad_diagnostic_setting.this]
 
   query = <<-KQL
     let timeWindow = 60m;
@@ -400,19 +436,20 @@ resource "azurerm_sentinel_alert_rule_scheduled" "impossible_travel" {
     | project UserPrincipalName, DistanceKm, Location1 = L1, Location2 = L2, TimeGenerated
   KQL
 
-/*
   incident_configuration {
     create_incident = true
 
     grouping {
       enabled                 = true
       lookback_duration       = "PT1H"
-      reopen_closed_incident  = false
-      entity_matching_method  = "Selected"
-      by_entities             = ["Account"]
+      reopen_closed_incidents  = false
+      entity_matching_method = "Selected"
+      group_by_entities       = ["Account"]
+      group_by_alert_details  = []
+      group_by_custom_details = []
     }
   }
-*/
+
   entity_mapping {
     entity_type = "Account"
 
@@ -422,3 +459,5 @@ resource "azurerm_sentinel_alert_rule_scheduled" "impossible_travel" {
     }
   }
 }
+
+*/

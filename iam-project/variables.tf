@@ -11,7 +11,7 @@ variable "subscription_id" {
 variable "location" {
   description = "Azure region for resources"
   type        = string
-  default     = "eastus"
+  default     = "southafricanorth"
 }
 
 variable "environment" {
@@ -31,59 +31,51 @@ variable "tenant_domain" {
   type        = string
 }
 
-# -----------------------------------------------------------------------
 # Users
-# -----------------------------------------------------------------------
 variable "users" {
   description = "Map of users to create"
   type = map(object({
-    display_name  = string
-    first_name    = string
-    last_name     = string
-    department    = string
-    job_title     = string
-    temp_password = string
+    display_name = string
+    first_name   = string
+    last_name    = string
+    department   = string
+    job_title    = string
   }))
   default = {
     alice_kamau = {
-      display_name  = "Alice Kamau"
-      first_name    = "Alice"
-      last_name     = "Kamau"
-      department    = "Finance"
-      job_title     = "Financial Analyst"
-      temp_password = "TempP@ss2024!"
+      display_name = "Alice Kamau"
+      first_name   = "Alice"
+      last_name    = "Kamau"
+      department   = "Finance"
+      job_title    = "Financial Analyst"
     }
     bob_otieno = {
-      display_name  = "Bob Otieno"
-      first_name    = "Bob"
-      last_name     = "Otieno"
-      department    = "IT"
-      job_title     = "Systems Engineer"
-      temp_password = "TempP@ss2024!"
+      display_name = "Bob Otieno"
+      first_name   = "Bob"
+      last_name    = "Otieno"
+      department   = "IT"
+      job_title    = "Systems Engineer"
     }
     carol_mwangi = {
-      display_name  = "Carol Mwangi"
-      first_name    = "Carol"
-      last_name     = "Mwangi"
-      department    = "HR"
-      job_title     = "HR Manager"
-      temp_password = "TempP@ss2024!"
+      display_name = "Carol Mwangi"
+      first_name   = "Carol"
+      last_name    = "Mwangi"
+      department   = "HR"
+      job_title    = "HR Manager"
     }
     david_njoroge = {
-      display_name  = "David Njoroge"
-      first_name    = "David"
-      last_name     = "Njoroge"
-      department    = "Sales"
-      job_title     = "Sales Executive"
-      temp_password = "TempP@ss2024!"
+      display_name = "David Njoroge"
+      first_name   = "David"
+      last_name    = "Njoroge"
+      department   = "Sales"
+      job_title    = "Sales Executive"
     }
     eve_wanjiku = {
-      display_name  = "Eve Wanjiku"
-      first_name    = "Eve"
-      last_name     = "Wanjiku"
-      department    = "IT"
-      job_title     = "Security Engineer"
-      temp_password = "TempP@ss2024!"
+      display_name = "Eve Wanjiku"
+      first_name   = "Eve"
+      last_name    = "Wanjiku"
+      department   = "IT"
+      job_title    = "Security Engineer"
     }
   }
 }
@@ -126,10 +118,10 @@ variable "applications" {
 variable "pim_eligible_assignments" {
   description = "Map of PIM eligible role assignments"
   type = map(object({
-    user_key           = string
-    role_display_name  = string
-    justification      = string
-    duration_months    = number
+    user_key          = string
+    role_display_name = string
+    justification     = string
+    duration_months   = number
   }))
   default = {
     bob_global_reader = {

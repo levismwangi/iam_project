@@ -6,8 +6,13 @@ variable "users" {
     last_name     = string
     department    = string
     job_title     = string
-    temp_password = string
   }))
+}
+
+variable "temp_password" {
+  description = "Temporary password for all new users"
+  type        = string
+  sensitive   = true # Marking as sensitive to avoid accidental exposure in logs or terraform apply
 }
 
 variable "tenant_domain" {

@@ -20,10 +20,11 @@ resource "azurerm_resource_group" "iam" {
 # Module: Users
 module "users" {
   source = "./modules/users"
-
   users         = var.users
   tenant_domain = var.tenant_domain
+  temp_password = data.azurerm_key_vault_secret.temp_password.value
 }
+
 
 # Module: Groups
 module "groups" {
@@ -34,15 +35,17 @@ module "groups" {
   company_name = var.company_name
 }
 
-
+#Tenant is not licensed for Conditional Access, so this module is currently disabled. To enable, uncomment the module block below and ensure you have the appropriate licenses in place.
+/*
 # Module: Conditional Access
 module "conditional_access" {
   source = "./modules/conditional_access"
 
-  it_group_object_id = module.groups.group_object_ids["IT"]
-  environment        = var.environment
+  it_group_object_id   = module.groups.group_object_ids["IT"]
+  break_glass_group_id = module.groups.break_glass_group_id
+  environment          = var.environment
 }
-
+*/
 # Module: App Registrations
 module "app_registrations" {
   source = "./modules/app_registrations"
@@ -84,4 +87,15 @@ module "monitoring" {
   resource_prefix     = local.resource_prefix
   alert_email         = var.alert_email
   log_retention_days  = var.log_retention_days
+}
+
+#Key Vault (used for storing temp password)
+data "azurerm_key_vault" "this" {
+  name                = "kv-iam-project"
+  resource_group_name = "rg-terraform-state"
+}
+
+data "azurerm_key_vault_secret" "temp_password" {
+  name         = "user-temp-password"
+  key_vault_id = data.azurerm_key_vault.this.id
 }

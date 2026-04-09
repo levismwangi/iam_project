@@ -26,11 +26,12 @@ output "app_object_ids" {
   value       = module.app_registrations.app_object_ids
 }
 
+/*
 output "conditional_access_policy_ids" {
   description = "IDs of all Conditional Access policies"
   value       = module.conditional_access.policy_ids
 }
-
+*/
 output "log_analytics_workspace_id" {
   description = "Resource ID of the Log Analytics workspace"
   value       = module.monitoring.log_analytics_workspace_id

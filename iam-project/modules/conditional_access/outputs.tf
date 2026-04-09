@@ -1,3 +1,4 @@
+/*
 output "policy_ids" {
   description = "Map of policy name to ID"
   value = {
@@ -10,3 +11,4 @@ output "policy_ids" {
     block_unknown_platforms              = azuread_conditional_access_policy.block_unknown_platforms.id
   }
 }
+*/

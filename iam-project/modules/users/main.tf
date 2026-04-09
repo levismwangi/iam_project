@@ -1,6 +1,4 @@
-##############################################################################
 # modules/users/main.tf
-##############################################################################
 
 resource "azuread_user" "this" {
   for_each = var.users
@@ -10,7 +8,7 @@ resource "azuread_user" "this" {
   surname               = each.value.last_name
   user_principal_name   = "${lower(replace(each.value.first_name, " ", ""))}.${lower(replace(each.value.last_name, " ", ""))}@${var.tenant_domain}"
   mail_nickname         = "${lower(replace(each.value.first_name, " ", ""))}.${lower(replace(each.value.last_name, " ", ""))}"
-  password              = each.value.temp_password
+  password              = var.temp_password
   force_password_change = true
   department            = each.value.department
   job_title             = each.value.job_title

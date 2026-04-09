@@ -1,5 +1,6 @@
+#Tenant is not licensed for Conditional Access, so this module is currently disabled. To enable, uncomment the module block below and ensure you have the appropriate licenses in place.
 # modules/conditional_access/main.tf
-
+/*
 locals {
   # Well-known role template IDs
   global_admin_role_id   = "62e90394-69f5-4237-9190-012177145e10"
@@ -22,7 +23,7 @@ resource "azuread_conditional_access_policy" "block_legacy_auth" {
 
     users {
       included_users  = ["All"]
-      excluded_groups = [var.break_glass_group_id]
+      excluded_groups = var.break_glass_group_id != null ? [var.break_glass_group_id] : []
     }
 
     applications {
@@ -56,7 +57,7 @@ resource "azuread_conditional_access_policy" "require_mfa_admins" {
         local.user_admin_role_id,
         local.privileged_auth_admin,
       ]
-      excluded_groups = [var.break_glass_group_id]
+      excluded_groups = var.break_glass_group_id != null ? [var.break_glass_group_id] : []
     }
 
     applications {
@@ -85,10 +86,10 @@ resource "azuread_conditional_access_policy" "require_mfa_all_users" {
 
     users {
       included_users  = ["All"]
-      excluded_groups = [
-        var.break_glass_group_id,
-        var.it_group_object_id, # IT excluded — managed separately under CA002
-      ]
+      excluded_groups = var.break_glass_group_id != null ? [
+      var.break_glass_group_id,
+      var.it_group_object_id
+    ]   :   [var.it_group_object_id]
     }
 
     applications {
@@ -119,7 +120,7 @@ resource "azuread_conditional_access_policy" "block_risky_locations" {
 
     users {
       included_users  = ["All"]
-      excluded_groups = [var.break_glass_group_id]
+      excluded_groups = var.break_glass_group_id != null ? [var.break_glass_group_id] : []
     }
 
     applications {
@@ -138,10 +139,8 @@ resource "azuread_conditional_access_policy" "block_risky_locations" {
   }
 }
 
-# ----------------------------------------------------------------------------
 # CA005 — Require MFA for Risky Sign-ins (low risk)
 # Rationale: Step-up auth for low-risk sign-ins rather than hard blocking
-# ----------------------------------------------------------------------------
 resource "azuread_conditional_access_policy" "mfa_risky_signin" {
   display_name = "CA005-Require-MFA-Risky-Sign-in"
   state        = local.enforcement_state
@@ -152,7 +151,7 @@ resource "azuread_conditional_access_policy" "mfa_risky_signin" {
 
     users {
       included_users  = ["All"]
-      excluded_groups = [var.break_glass_group_id]
+      excluded_groups = var.break_glass_group_id != null ? [var.break_glass_group_id] : []
     }
 
     applications {
@@ -170,10 +169,9 @@ resource "azuread_conditional_access_policy" "mfa_risky_signin" {
   }
 }
 
-# ----------------------------------------------------------------------------
+
 # CA006 — Require Password Change for High User Risk
 # Rationale: Compromised credentials should trigger immediate remediation
-# ----------------------------------------------------------------------------
 resource "azuread_conditional_access_policy" "require_password_change_high_user_risk" {
   display_name = "CA006-Require-Password-Change-High-User-Risk"
   state        = local.enforcement_state
@@ -184,7 +182,7 @@ resource "azuread_conditional_access_policy" "require_password_change_high_user_
 
     users {
       included_users  = ["All"]
-      excluded_groups = [var.break_glass_group_id]
+      excluded_groups = var.break_glass_group_id != null ? [var.break_glass_group_id] : []
     }
 
     applications {
@@ -202,10 +200,9 @@ resource "azuread_conditional_access_policy" "require_password_change_high_user_
   }
 }
 
-# ----------------------------------------------------------------------------
+
 # CA007 — Block Access for Unknown / Unsupported Device Platforms
 # Rationale: Only known OS platforms should access corporate resources
-# ----------------------------------------------------------------------------
 resource "azuread_conditional_access_policy" "block_unknown_platforms" {
   display_name = "CA007-Block-Unknown-Device-Platforms"
   state        = local.enforcement_state
@@ -220,7 +217,7 @@ resource "azuread_conditional_access_policy" "block_unknown_platforms" {
 
     users {
       included_users  = ["All"]
-      excluded_groups = [var.break_glass_group_id]
+      excluded_groups = var.break_glass_group_id != null ? [var.break_glass_group_id] : []
     }
 
     applications {
@@ -237,3 +234,4 @@ resource "azuread_conditional_access_policy" "block_unknown_platforms" {
     built_in_controls = ["block"]
   }
 }
+*/

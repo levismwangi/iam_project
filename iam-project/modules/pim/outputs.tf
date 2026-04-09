@@ -1,3 +1,4 @@
+/*
 output "eligible_assignment_ids" {
   description = "Map of assignment key to schedule request ID"
   value = {
@@ -13,3 +14,5 @@ output "activated_role_ids" {
     k => r.object_id
   }
 }
+
+*/

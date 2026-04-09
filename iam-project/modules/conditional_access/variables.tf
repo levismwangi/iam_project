@@ -1,3 +1,4 @@
+/*
 variable "it_group_object_id" {
   description = "Object ID of the IT department group"
   type        = string
@@ -6,7 +7,7 @@ variable "it_group_object_id" {
 variable "break_glass_group_id" {
   description = "Object ID of the break-glass group — excluded from all CA policies"
   type        = string
-  default     = ""
+  default     = null
 }
 
 variable "environment" {
@@ -14,3 +15,4 @@ variable "environment" {
   type        = string
   default     = "dev"
 }
+*/
