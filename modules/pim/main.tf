@@ -3,6 +3,7 @@
 # modules/pim/main.tf
 # Privileged Identity Management — Just-In-Time eligible role assignments
 
+/*
 
 # Look up available directory role definitions
 data "azuread_directory_role_templates" "all" {}
@@ -14,7 +15,7 @@ resource "azuread_directory_role" "pim_roles" {
 }
 
 
-/*
+
 # PIM Eligible Role Assignments
 # Users get the role assigned as ELIGIBLE — they must activate it on-demand
 # via the Azure Portal or Graph API with justification
