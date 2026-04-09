@@ -79,3 +79,17 @@ resource "azuread_app_role_assignment" "this" {
   principal_object_id = var.group_ids[each.value.group_key]
   resource_object_id  = azuread_service_principal.this[each.value.app_key].object_id
 }
+
+terraform {
+  required_version = ">= 1.6.0"
+  required_providers {
+    azuread = {
+      source  = "hashicorp/azuread"
+      version = "~> 2.47"
+    }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.9"
+    }
+  }
+}
