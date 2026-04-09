@@ -96,7 +96,7 @@ Grant the SP these **Microsoft Graph API permissions** (App registrations → AP
 
 | Permission | Purpose |
 |---|---|
-| `Application.ReadWrite.OwnedBy` | Create/manage app registrations owned by this SP |
+| `Application.ReadWrite.All` | Create/manage app registrations owned by this SP |
 | `Directory.ReadWrite.All` | Manage users, groups, and directory objects |
 | `Policy.ReadWrite.ConditionalAccess` | Create and update CA policies |
 | `RoleManagement.ReadWrite.Directory` | Assign Entra ID roles |
