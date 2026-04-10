@@ -92,6 +92,8 @@ This project requires **Entra ID P2** for the full feature set (Conditional Acce
 
 > **Note:** M365 Business Premium is not sufficient for this project — PIM requires Entra ID P2.
 
+---
+
 ### 2. Create a Service Principal for Terraform
 
 ```bash
@@ -113,7 +115,7 @@ Grant the SP these **Microsoft Graph API permissions** (App registrations → AP
 | `RoleManagement.ReadWrite.Directory` | Assign Entra ID roles |
 | `PrivilegedAccess.ReadWrite.AzureAD` | Configure PIM policies and assignments |
 
-> **Important:** All Graph API permissions require **admin consent** — granting the permission alone is not sufficient. Without consent, Terraform apply will fail with `Authorization_RequestDailed (403)`.
+> **Important:** All Graph API permissions require **admin consent** — granting the permission alone is not sufficient. Without consent, Terraform apply will fail with `Authorization_RequestDenied (403)`.
 
 > **Note:** Use `Application.ReadWrite.All` and not `Application.ReadWrite.OwnedBy` — the narrower permission does not allow creating service principals or managing app passwords, which will cause 403 errors on `azuread_service_principal` and `azuread_application_password` resources.
 
@@ -123,6 +125,8 @@ Also assign the SP the **Security Administrator** Entra ID role to allow managin
 2. Search for **Security Administrator** → **Add assignments** → select your SP
 
 > This is required for the `azurerm_monitor_aad_diagnostic_setting` resource. Diagnostic settings for Entra ID live outside normal subscription scope and cannot be managed with Azure RBAC roles alone.
+
+---
 
 ### 3. Configure OIDC Federated Identity (No Client Secrets)
 
@@ -149,7 +153,7 @@ Each credential maps to a different pipeline trigger:
 | `github-env-dev` | `repo:<org>/<repo>:environment:dev` | `workflow_dispatch` targeting dev |
 | `github-pr` | `repo:<org>/<repo>:pull_request` | Pull requests |
 
-> Use the exact GitHub repo name (case-sensitive). If OIDC auth fails, check the `Azure Login` step logs — line 20 shows the exact subject string GitHub is sending.
+> Use the exact GitHub repo name (case-sensitive). If OIDC auth fails, check the `Azure Login` step logs — it shows the exact subject string GitHub is sending.
 
 #### Configure providers.tf
 
@@ -164,6 +168,8 @@ provider "azuread" {
 }
 ```
 
+---
+
 ### 4. Grant Key Vault Access to the Service Principal
 
 ```bash
@@ -175,7 +181,67 @@ az role assignment create \
 
 > Role assignments can take 1–2 minutes to propagate. If you see a 403 immediately after granting access, wait and re-run.
 
-### 5. Create Terraform Remote State Storage
+---
+
+### 5. Create and Store the Temp Password Secret in Key Vault
+
+Terraform reads the temporary user password from Key Vault at apply time — it is never hardcoded in the codebase.
+
+#### Create the Key Vault
+
+```bash
+az keyvault create \
+  --name kv-iam-<yourname> \
+  --resource-group rg-terraform-state \
+  --location eastus \
+  --sku standard
+```
+
+#### Grant yourself access to manage secrets
+
+```bash
+# Get your object ID
+az ad signed-in-user show --query id -o tsv
+
+# Assign Key Vault Secrets Officer role
+az role assignment create \
+  --role "Key Vault Secrets Officer" \
+  --assignee <your-object-id> \
+  --scope "/subscriptions/<subscription-id>/resourcegroups/rg-terraform-state/providers/Microsoft.KeyVault/vaults/kv-iam-<yourname>"
+```
+
+Wait 30 seconds for the role to propagate before proceeding.
+
+#### Store the temporary password securely
+
+The password is assigned to all new users on first login and must be changed immediately. Must meet Azure AD complexity requirements — 8+ characters, uppercase, lowercase, number, and special character.
+
+```powershell
+# Prompts for password without showing it on screen
+$password = Read-Host -AsSecureString "Enter temp password"
+$plaintext = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+  [Runtime.InteropServices.Marshal]::SecureStringToBSTR($password)
+)
+az keyvault secret set `
+  --vault-name kv-iam-<yourname> `
+  --name "user-temp-password" `
+  --value $plaintext `
+  --query "{name:name, id:id}" `
+  -o table
+```
+
+> The `--query` flag suppresses the secret value from the output — only the name and ID are printed.
+
+#### Update terraform.tfvars
+
+```hcl
+key_vault_name                = "kv-iam-<yourname>"
+bootstrap_resource_group_name = "rg-terraform-state"
+```
+
+---
+
+### 6. Create Terraform Remote State Storage
 
 ```bash
 az group create --name rg-terraform-state --location eastus
@@ -191,20 +257,57 @@ az storage container create \
   --account-name tfstateiam
 ```
 
-### 6. Configure Variables
+---
+
+### 7. Configure Variables
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars with your tenant values
 ```
 
-### 7. Deploy
+> Make sure `alert_email` is a real email address you own — Azure will reject placeholder addresses when creating the action group.
+
+---
+
+### 8. Deploy
 
 ```bash
 terraform init
 terraform validate
 terraform plan
 terraform apply
+```
+
+---
+
+## Known Issues & Workarounds
+
+### SignInLogs table not found
+Alert rules that query `SignInLogs` will fail on first deploy because the table doesn't exist until sign-in data starts flowing into Log Analytics.
+
+**Fix:**
+1. Comment out `signin_outside_trusted` and `impossible_travel` in `modules/monitoring/main.tf`
+2. Run `terraform apply` — everything else deploys including diagnostic settings
+3. Sign out and back into the Portal with your admin account
+4. Wait 10-15 minutes for the first sign-in logs to stream through
+5. Verify the table exists: **Log Analytics → Logs → run `SignInLogs | take 5`**
+6. Uncomment the two rules and re-run `terraform apply`
+
+### PIM 403 PermissionScopeNotGranted
+Terraform cannot create PIM eligible assignments without the **Privileged Role Administrator** role on your account.
+
+**Fix:** Entra ID → Roles and administrators → Privileged Role Administrator → Add assignments → your account → wait 30 seconds → re-run `terraform apply`
+
+### Key Vault Forbidden on secret set
+If you get a 403 when setting Key Vault secrets via CLI, your account lacks an access policy or RBAC role on the vault.
+
+**Fix:**
+```bash
+az role assignment create \
+  --role "Key Vault Secrets Officer" \
+  --assignee <your-object-id> \
+  --scope "/subscriptions/<sub-id>/resourcegroups/<rg>/providers/Microsoft.KeyVault/vaults/<vault-name>"
 ```
 
 ---
@@ -238,6 +341,13 @@ The pipeline supports two environments (`dev` / `prod`) selected at dispatch tim
 
 > `AZURE_CLIENT_SECRET` is intentionally absent — OIDC eliminates the need for it.
 
+### Setting Up GitHub Environments
+
+Go to **GitHub repo → Settings → Environments → New environment:**
+
+- Create `dev` — no protection rules needed
+- Create `prod` — add **Required reviewers** (add yourself) so prod requires manual approval before applying
+
 ---
 
 ## Security Design Decisions
@@ -253,6 +363,7 @@ The pipeline supports two environments (`dev` / `prod`) selected at dispatch tim
 | Remote state in Azure Storage | State is encrypted at rest, not stored in Git |
 | `terraform.tfvars` in `.gitignore` | Prevents credentials leaking to Git |
 | Key Vault Secrets User (not Owner) on SP | Least-privilege — read-only access to secrets |
+| Passwords stored in Key Vault | Never hardcoded — fetched at apply time, marked sensitive |
 
 ---
 
