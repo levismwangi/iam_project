@@ -12,6 +12,8 @@
 # #1431, #1613.
 
 
+/*
+
 resource "azuread_privileged_access_group_eligibility_schedule" "this" {
     for_each = var.group_eligible_assignments
 
@@ -63,3 +65,5 @@ resource "azuread_group_role_management_policy" "this" {
         }
     }
 }
+*/
+

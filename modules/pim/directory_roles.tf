@@ -14,6 +14,8 @@
 # Activate each distinct directory role referenced below (de-duplicated —
 # activating a role is a one-time, tenant-wide action, not per-assignment).
 
+
+/*
 resource "azuread_directory_role" "this" {
     for_each = toset([
         for v in var.directory_role_eligible_assignments : v.role_display_name
@@ -30,3 +32,5 @@ resource "azuread_directory_role_eligibility_schedule_request" "this" {
     directory_scope_id  = "/" # tenant-wide; directory roles do not support sub-scoping
     justification       = each.value.justification
 }
+
+*/

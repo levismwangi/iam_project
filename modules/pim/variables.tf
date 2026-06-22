@@ -4,6 +4,7 @@
 # Users and groups are looked up by an arbitrary "key" you choose, so that
 # other variables (below) can reference "alice" instead of a raw object ID.
 
+/*
 variable "user_objects" {
   description = "Map of user_key => user object (must include object_id)"
   type = map(object({
@@ -95,3 +96,5 @@ variable "rbac_activation_policies" {
   }))
   default = {}
 }
+
+*/

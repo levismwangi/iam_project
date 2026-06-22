@@ -7,6 +7,8 @@
 # `scope` is supplied per-assignment (not hardcoded to subscription or RG),
 # so this works whether you target subscriptions, resource groups, or a mix.
 
+/*
+
 resource "azurerm_pim_eligible_role_assignment" "this" {
     for_each = var.rbac_eligible_assignments
 
@@ -66,3 +68,6 @@ resource azurerm_role_management_policy "this" {
         }
     }
 }
+
+
+*/
