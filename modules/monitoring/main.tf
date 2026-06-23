@@ -151,7 +151,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "new_admin_role" {
 }
 
 # ALERT 2 — Bulk User Deletion
-# Detects: Multiple users deleted in a short window — potential insider threat
+## Detects: Multiple users deleted in a short window — potential insider threat
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "bulk_user_deletion" {
   name                = "alert-${var.resource_prefix}-bulk-user-deletion"
   location            = var.location
