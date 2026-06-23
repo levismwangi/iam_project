@@ -261,7 +261,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "signin_outside_truste
   evaluation_frequency = "PT15M"
   window_duration      = "PT15M"
 
-  scopes = [azurerm_log_analytics_workspace.this.id]
+  scopes     = [azurerm_log_analytics_workspace.this.id]
   depends_on = [azurerm_monitor_aad_diagnostic_setting.this]
 
   criteria {
