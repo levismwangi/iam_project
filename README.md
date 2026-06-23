@@ -2,68 +2,63 @@
 
 An Identity and Access Management solution built on **Microsoft Entra ID**, fully provisioned via **Terraform IaC** with a **GitHub Actions CI/CD pipeline**.
 
----
-
 ## Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                  Microsoft Entra ID Tenant               │
-│                                                          │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────┐  │
-│  │  Users   │  │  Groups  │  │   Apps   │  │  PIM   │  │
-│  │ (5 dept) │  │(4 depts) │  │(3 apps)  │  │  JIT   │  │
-│  └──────────┘  └──────────┘  └──────────┘  └────────┘  │
-│                                                          │
-│  ┌─────────────────────────────────────────────────────┐ │
-│  │           Conditional Access Policies (7)            │ │
-│  │  CA001 Block Legacy  │  CA002 MFA Admins            │ │
-│  │  CA003 MFA All Users │  CA004 Risky Locations       │ │
-│  │  CA005 Risky Sign-in │  CA006 Password Change       │ │
-│  │  CA007 Unknown Platform                             │ │
-│  └─────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────┘
-                          │
-                          ▼ Diagnostic Settings
-┌─────────────────────────────────────────────────────────┐
-│              Log Analytics Workspace + Sentinel          │
-│                                                          │
-│  Alert Rules:                                            │
-│  • New admin role assignment                             │
-│  • Bulk user deletion (3+ in 5 min)                     │
-│  • Conditional Access policy modified                    │
-│  • Sign-in outside trusted location                      │
-│  • New MFA method registered                             │
-│  • PIM activation outside business hours                 │
-│  • Impossible travel (Sentinel)                          │
-└─────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TB
+    subgraph Tenant["Microsoft Entra ID Tenant"]
+        Users["Users\n5 departments"]
+        Groups["Groups\n4 departments"]
+        Apps["App Registrations\n3 apps"]
+        PIM["PIM\nJIT role activation"]
+    end
 
----
+    subgraph CA["Conditional Access Policies (7)"]
+        CA1["CA001 Block Legacy Auth"]
+        CA2["CA002 MFA for Admins"]
+        CA3["CA003 MFA for All Users"]
+        CA4["CA004 Risky Locations"]
+        CA5["CA005 Risky Sign-in"]
+        CA6["CA006 Password Change"]
+        CA7["CA007 Unknown Platform"]
+    end
 
-## Project Structure
+    Tenant --> CA
+    CA -->|Diagnostic Settings| LA["Log Analytics Workspace"]
+    LA --> Sentinel["Microsoft Sentinel"]
 
-```
-iam-project/
-├── .github/
-│   └── workflows/
-│       └── terraform.yml          # CI/CD pipeline
-├── modules/
-│   ├── users/                     # Entra ID user provisioning
-│   ├── groups/                    # Department security groups
-│   ├── conditional_access/        # 7 CA policies
-│   ├── pim/                       # JIT role assignments + policies
-│   ├── app_registrations/         # App registrations + SSO + RBAC
-│   └── monitoring/                # Log Analytics + Sentinel + Alerts
-├── main.tf                        # Root module — wires everything together
-├── variables.tf                   # All input variable definitions
-├── outputs.tf                     # All output definitions
-├── providers.tf                   # Provider + backend configuration
-├── terraform.tfvars.example       # Variable file template
-└── .gitignore
+    Sentinel --> Alert1["New admin role assignment"]
+    Sentinel --> Alert2["Bulk user deletion (3+ in 5 min)"]
+    Sentinel --> Alert3["CA policy modified"]
+    Sentinel --> Alert4["Sign-in outside trusted location"]
+    Sentinel --> Alert5["New MFA method registered"]
+    Sentinel --> Alert6["PIM activation outside hours"]
+    Sentinel --> Alert7["Impossible travel"]
+
+    style Tenant fill:#e8f0fe,stroke:#4285f4
+    style CA fill:#fef7e0,stroke:#f9ab00
+    style LA fill:#e6f4ea,stroke:#34a853
+    style Sentinel fill:#fce8e6,stroke:#ea4335
 ```
 
----
+### CI/CD Flow
+
+```mermaid
+flowchart LR
+    Dev["Developer pushes\nto branch"] --> PR["Pull Request"]
+    PR --> Validate["validate job\nfmt · validate · TFLint · Checkov"]
+    Validate --> Plan["plan job\nposts diff as PR comment"]
+    Plan --> Review["Code review\n+ plan review"]
+    Review --> Merge["Merge to main"]
+    Merge --> Dispatch["Manual dispatch\naction=apply"]
+    Dispatch --> Gate{"GitHub Environment\napproval gate"}
+    Gate -->|dev: no approval needed| ApplyDev["Apply to dev"]
+    Gate -->|prod: required reviewer| ApplyProd["Apply to prod"]
+
+    style Gate fill:#fef7e0,stroke:#f9ab00
+    style ApplyProd fill:#fce8e6,stroke:#ea4335
+```
+
 
 ## Prerequisites
 
