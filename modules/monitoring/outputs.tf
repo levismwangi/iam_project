@@ -13,7 +13,7 @@ output "action_group_id" {
   value       = azurerm_monitor_action_group.iam_security.id
 }
 
-/*
+
 output "alert_rule_ids" {
   description = "Map of alert rule names to resource IDs"
   value = {
@@ -26,7 +26,7 @@ output "alert_rule_ids" {
   }
 }
 
-*/
+
 output "sentinel_workspace_id" {
   description = "Sentinel onboarding workspace ID"
   value       = azurerm_sentinel_log_analytics_workspace_onboarding.this.id

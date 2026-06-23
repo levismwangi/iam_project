@@ -104,8 +104,6 @@ resource "azurerm_monitor_action_group" "iam_security" {
   }
 }
 
-
-/*
 # ALERT 1 — New Admin Role Assignment
 # Detects: Someone granted a privileged role
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "new_admin_role" {
@@ -249,7 +247,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ca_policy_change" {
 }
 
 
-/*
+
 # ALERT 4 — Sign-in from Outside Trusted Locations
 # Detects: User signing in from an unexpected geography
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "signin_outside_trusted" {
