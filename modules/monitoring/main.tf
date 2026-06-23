@@ -105,6 +105,7 @@ resource "azurerm_monitor_action_group" "iam_security" {
 }
 
 
+/*
 # ALERT 1 — New Admin Role Assignment
 # Detects: Someone granted a privileged role
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "new_admin_role" {
@@ -297,7 +298,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "signin_outside_truste
   }
 }
 
-*/
+
 # ALERT 5 — MFA Registration by New User
 # Detects: A new MFA method registered — useful for detecting account takeover
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "mfa_registration" {
