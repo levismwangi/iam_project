@@ -156,7 +156,7 @@ jobs:
 
       # -detailed-exitcode: 0 = no changes, 1 = error, 2 = changes present.
       # This is what makes drift detection meaningful — the workflow can react
-      # differently depending on whether drift was actually found.
+      # differently depending on whether drift was actually found .
       - name: Terraform Plan
         id: plan
         run: |
