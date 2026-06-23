@@ -116,6 +116,7 @@ variable "applications" {
 
 
 # PIM
+# Directory roles (Azure AD roles)
 variable "pim_eligible_assignments" {
   description = "Map of PIM eligible role assignments"
   type = map(object({
@@ -179,11 +180,11 @@ variable "pim_group_activation_policies" {
   }))
   default = {
     IT = {
-      role_id                             = "member"
-      maximum_duration                    = "PT8H"
-      require_approval                    = false # TODO: revisit once an approver group is decided on
-      require_justification               = true
-      require_multifactor_authentication  = true
+      role_id                            = "member"
+      maximum_duration                   = "PT8H"
+      require_approval                   = false # TODO: revisit once an approver group is decided on
+      require_justification              = true
+      require_multifactor_authentication = true
     }
   }
 }
@@ -217,7 +218,7 @@ variable "pim_rbac_activation_policies" {
     require_justification              = optional(bool, true)
     require_multifactor_authentication = optional(bool, true)
     approver_group_key                 = optional(string)
-    active_assignment_expire_after    = optional(string, "P365D") # ISO8601, e.g. "P365D" for 1 year
+    active_assignment_expire_after     = optional(string, "P365D") # ISO8601, e.g. "P365D" for 1 year
   }))
   default = {} # populated via root main.tf using locals
 }
