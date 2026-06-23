@@ -69,14 +69,33 @@ module "app_registrations" {
   }
 }
 
+data "azurerm_role_definition" "reader" {
+  name = "Reader"
+}
+
+locals {
+  reader_role_definition_id = "${data.azurerm_subscription.primary.id}${data.azurerm_role_definition.reader.id}"
+
+  pim_rbac_eligible_assignments = {
+    bob_subscription_reader = {
+      scope              = data.azurerm_subscription.primary.id
+      role_definition_id = local.reader_role_definition_id
+      principal_key      = "bob_otieno"
+      duration_hours     = 8
+      justification      = "IT engineer requires temporary Reader access at the subscription level for troubleshooting"
+    }
+  }
+}
 
 /*
-# Module: PIM
 module "pim" {
   source = "./modules/pim"
 
-  pim_eligible_assignments = var.pim_eligible_assignments
-  user_objects             = module.users.user_objects
+  user_objects  = module.users.user_objects
+  group_objects = module.groups.group_object_ids
+
+  directory_role_eligible_assignments = var.pim_eligible_assignments
+  # group_eligible_assignments, rbac_eligible_assignments, etc. — add as needed
 }
 */
 
