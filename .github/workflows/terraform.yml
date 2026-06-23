@@ -4,9 +4,16 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - "README.md"
+      - "docs/**"
   pull_request:
     branches:
       - main
+  schedule:
+    # Nightly drift detection — catches manual changes made outside Terraform
+    # (e.g. someone edits a Conditional Access policy directly in the Entra portal)
+    - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
       environment:
@@ -29,6 +36,12 @@ on:
 env:
   TF_VERSION: "1.7.0"
   WORKING_DIR: "."
+
+# Prevents two runs from racing against the same state file —
+# e.g. a push to main and a manual dispatch targeting the same environment
+concurrency:
+  group: terraform-${{ github.event.inputs.environment || 'dev' }}
+  cancel-in-progress: false
 
 jobs:
   validate:
@@ -61,24 +74,32 @@ jobs:
 
       - run: tflint --format compact --recursive
 
-      - uses: bridgecrewio/checkov-action@v12
+      # Checkov blocks the pipeline on CRITICAL/HIGH findings instead of
+      # always passing. soft_fail only applies to LOW/MEDIUM so the scan still
+      # surfaces minor issues without blocking on them.
+      - name: Checkov (block on HIGH/CRITICAL)
+        uses: bridgecrewio/checkov-action@v12
         with:
           directory: ${{ env.WORKING_DIR }}
           framework: terraform
-          soft_fail: true
+          soft_fail_on: LOW,MEDIUM
+          hard_fail_on: HIGH,CRITICAL
           output_format: cli
 
   plan:
     name: "Terraform Plan"
     runs-on: ubuntu-latest
     needs: validate
-    environment: ${{ github.event.inputs.environment || 'dev' }}
+    # Drift-detection runs always target prod read-only; everything else
+    # respects the manual dispatch input, defaulting to dev
+    environment: ${{ github.event_name == 'schedule' && 'prod' || (github.event.inputs.environment || 'dev') }}
+    outputs:
+      exitcode: ${{ steps.plan.outputs.exitcode }}
 
-    # OIDC: Required permissions to request a JWT from GitHub's OIDC provider
     permissions:
       id-token: write
       contents: read
-      pull-requests: write  # needed for PR comments
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@v4
@@ -87,27 +108,24 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      # OIDC DEV: Federates with Azure using a short-lived token — no client secret needed
       - name: Azure Login (DEV)
-        if: ${{ (github.event.inputs.environment || 'dev') != 'prod' }}
+        if: ${{ github.event_name != 'schedule' && (github.event.inputs.environment || 'dev') != 'prod' }}
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID_DEV }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID_DEV }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}
 
-      # OIDC PROD: Same flow, different federated credential
       - name: Azure Login (PROD)
-        if: ${{ github.event.inputs.environment == 'prod' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.environment == 'prod' }}
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID_PROD }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID_PROD }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}
 
-      # Pass ARM env vars so Terraform knows to use OIDC
       - name: Set Terraform ARM env vars (DEV)
-        if: ${{ (github.event.inputs.environment || 'dev') != 'prod' }}
+        if: ${{ github.event_name != 'schedule' && (github.event.inputs.environment || 'dev') != 'prod' }}
         run: |
           echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_DEV }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
@@ -117,10 +135,10 @@ jobs:
           echo "TF_VAR_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
           echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_DEV }}" >> $GITHUB_ENV
           echo "TF_VAR_tenant_domain=${{ secrets.AZURE_TENANT_DOMAIN_DEV }}" >> $GITHUB_ENV
-          echo "TF_VAR_alert_email=${{ secrets.ALERT_EMAIL_DEV }}" >> $GITHUB_ENV
+          echo "TF_VAR_alert_email=${{ secrets.ALERT_EMAIL }}" >> $GITHUB_ENV
 
       - name: Set Terraform ARM env vars (PROD)
-        if: ${{ github.event.inputs.environment == 'prod' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.environment == 'prod' }}
         run: |
           echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_PROD }}" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
@@ -130,48 +148,72 @@ jobs:
           echo "TF_VAR_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
           echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_PROD }}" >> $GITHUB_ENV
           echo "TF_VAR_tenant_domain=${{ secrets.AZURE_TENANT_DOMAIN_PROD }}" >> $GITHUB_ENV
-          echo "TF_VAR_alert_email=${{ secrets.ALERT_EMAIL_PROD }}" >> $GITHUB_ENV
+          echo "TF_VAR_alert_email=${{ secrets.ALERT_EMAIL }}" >> $GITHUB_ENV
 
       - name: Terraform Init
         run: terraform init
         working-directory: ${{ env.WORKING_DIR }}
 
+      # -detailed-exitcode: 0 = no changes, 1 = error, 2 = changes present.
+      # This is what makes drift detection meaningful — the workflow can react
+      # differently depending on whether drift was actually found.
       - name: Terraform Plan
         id: plan
         run: |
+          set +e
           terraform plan \
-            -var="environment=${{ github.event.inputs.environment || 'dev' }}" \
-            -out=tfplan-${{ github.event.inputs.environment || 'dev' }}
+            -var="environment=${{ github.event_name == 'schedule' && 'prod' || (github.event.inputs.environment || 'dev') }}" \
+            -out=tfplan \
+            -detailed-exitcode \
+            -no-color
+          echo "exitcode=$?" >> "$GITHUB_OUTPUT"
+          exit 0
         working-directory: ${{ env.WORKING_DIR }}
 
+      - name: Fail on plan error
+        if: steps.plan.outputs.exitcode == 1
+        run: |
+          echo "::error::Terraform plan failed (exit code 1)"
+          exit 1
+
+      - name: Flag drift (scheduled run only)
+        if: github.event_name == 'schedule' && steps.plan.outputs.exitcode == 2
+        run: |
+          echo "::warning::Drift detected in prod — infrastructure differs from Terraform state. Review the plan output and reconcile manually or via a follow-up apply."
+
       - name: Upload Plan Artifact
+        if: github.event_name != 'schedule'
         uses: actions/upload-artifact@v4
         with:
-          name: tfplan-${{ github.event.inputs.environment || 'dev' }}
-          path: tfplan-${{ github.event.inputs.environment || 'dev' }}
-          retention-days: 7
+          name: tfplan-${{ github.event.inputs.environment || 'dev' }}-${{ github.run_id }}
+          path: tfplan
+          retention-days: 30
 
       - name: Post Plan to PR
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          terraform show -no-color tfplan-${{ github.event.inputs.environment || 'dev' }} > plan.txt
-          PLAN_SUMMARY=$(head -n 30 plan.txt)
-          gh pr comment ${{ github.event.pull_request.number }} --body "#### Terraform Plan — ${{ github.event.inputs.environment || 'dev' }} 🔍
-          \`\`\`
-          $PLAN_SUMMARY
-          ...
-          \`\`\`"
+          terraform show -no-color tfplan > plan.txt
+          {
+            echo "#### Terraform Plan — ${{ github.event.inputs.environment || 'dev' }} 🔍"
+            echo '```'
+            # Show full plan, but cap at GitHub's comment size limits.
+            # Full plan.txt is always available as a workflow artifact above.
+            tail -c 60000 plan.txt
+            echo '```'
+            echo "_Full plan available in the [workflow run artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})._"
+          } > comment.md
+          gh pr comment ${{ github.event.pull_request.number }} --body-file comment.md
+        working-directory: ${{ env.WORKING_DIR }}
 
   apply:
     name: "Terraform Apply"
     runs-on: ubuntu-latest
     needs: plan
-    if: github.event.inputs.action == 'apply'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
     environment: ${{ github.event.inputs.environment || 'dev' }}
 
-    # OIDC: Same permissions required in apply job
     permissions:
       id-token: write
       contents: read
@@ -210,7 +252,8 @@ jobs:
           echo "TF_VAR_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
           echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_DEV }}" >> $GITHUB_ENV
           echo "TF_VAR_tenant_domain=${{ secrets.AZURE_TENANT_DOMAIN_DEV }}" >> $GITHUB_ENV
-          echo "TF_VAR_alert_email=${{ secrets.ALERT_EMAIL_DEV }}" >> $GITHUB_ENV
+          echo "TF_VAR_alert_email=${{ secrets.ALERT_EMAIL }}" >> $GITHUB_ENV
+
       - name: Set Terraform ARM env vars (PROD)
         if: ${{ github.event.inputs.environment == 'prod' }}
         run: |
@@ -222,7 +265,7 @@ jobs:
           echo "TF_VAR_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
           echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_PROD }}" >> $GITHUB_ENV
           echo "TF_VAR_tenant_domain=${{ secrets.AZURE_TENANT_DOMAIN_PROD }}" >> $GITHUB_ENV
-          echo "TF_VAR_alert_email=${{ secrets.ALERT_EMAIL_PROD }}" >> $GITHUB_ENV
+          echo "TF_VAR_alert_email=${{ secrets.ALERT_EMAIL }}" >> $GITHUB_ENV
 
       - name: Terraform Init
         run: terraform init
@@ -231,11 +274,30 @@ jobs:
       - name: Download Plan Artifact
         uses: actions/download-artifact@v4
         with:
-          name: tfplan-${{ github.event.inputs.environment || 'dev' }}
+          name: tfplan-${{ github.event.inputs.environment || 'dev' }}-${{ github.run_id }}
           path: ${{ env.WORKING_DIR }}
 
+      # Re-checks the plan against current state right before applying.
+      # If something changed between plan and apply (e.g. manual portal edit,
+      # or someone else's apply landed first), this catches it instead of
+      # blindly applying a now-stale plan.
+      - name: Verify plan is still current
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -out=tfplan-recheck -no-color \
+            -var="environment=${{ github.event.inputs.environment || 'dev' }}"
+          code=$?
+          if [ "$code" -eq 2 ]; then
+            echo "::error::State has drifted since the plan was generated. Re-run plan before applying."
+            exit 1
+          elif [ "$code" -eq 1 ]; then
+            echo "::error::Terraform plan re-check failed."
+            exit 1
+          fi
+        working-directory: ${{ env.WORKING_DIR }}
+
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan-${{ github.event.inputs.environment || 'dev' }}
+        run: terraform apply -auto-approve tfplan
         working-directory: ${{ env.WORKING_DIR }}
 
       - name: Terraform Output
@@ -245,6 +307,6 @@ jobs:
       - name: Upload Outputs
         uses: actions/upload-artifact@v4
         with:
-          name: tf-outputs-${{ github.event.inputs.environment || 'dev' }}
+          name: tf-outputs-${{ github.event.inputs.environment || 'dev' }}-${{ github.run_id }}
           path: tf-outputs-${{ github.event.inputs.environment || 'dev' }}.json
-          retention-days: 30
+          retention-days: 90
