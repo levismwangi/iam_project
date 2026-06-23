@@ -73,6 +73,9 @@ data "azurerm_role_definition" "reader" {
   name = "Reader"
 }
 
+data "azurerm_subscription" "primary" {
+}
+
 locals {
   reader_role_definition_id = "${data.azurerm_subscription.primary.id}${data.azurerm_role_definition.reader.id}"
 
