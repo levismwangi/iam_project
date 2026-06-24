@@ -107,12 +107,12 @@ resource "azurerm_monitor_action_group" "iam_security" {
 # ALERT 1 — New Admin Role Assignment
 # Detects: Someone granted a privileged role
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "new_admin_role" {
-  name                = "alert-${var.resource_prefix}-new-admin-role-assignment"
-  location            = var.location
-  resource_group_name = var.resource_group_name
-  description         = "Fires when a user is added to a privileged directory role"
-  severity            = 2
-  enabled             = true
+  name                  = "alert-${var.resource_prefix}-new-admin-role-assignment"
+  location              = var.location
+  resource_group_name   = var.resource_group_name
+  description           = "Fires when a user is added to a privileged directory role"
+  severity              = 2
+  enabled               = true
   skip_query_validation = true
 
   evaluation_frequency = "PT5M"
@@ -154,12 +154,12 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "new_admin_role" {
 # ALERT 2 — Bulk User Deletion
 ## Detects: Multiple users deleted in a short window — potential insider threat
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "bulk_user_deletion" {
-  name                = "alert-${var.resource_prefix}-bulk-user-deletion"
-  location            = var.location
-  resource_group_name = var.resource_group_name
-  description         = "Fires when 3 or more users are deleted within 5 minutes"
-  severity            = 1
-  enabled             = true
+  name                  = "alert-${var.resource_prefix}-bulk-user-deletion"
+  location              = var.location
+  resource_group_name   = var.resource_group_name
+  description           = "Fires when 3 or more users are deleted within 5 minutes"
+  severity              = 1
+  enabled               = true
   skip_query_validation = true
 
   evaluation_frequency = "PT5M"
@@ -201,15 +201,15 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "bulk_user_deletion" {
 # ALERT 3 — Conditional Access Policy Modified or Disabled
 # Detects: Someone changed a CA policy — could open security gaps
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ca_policy_change" {
-  name                = "alert-${var.resource_prefix}-ca-policy-modified"
-  location            = var.location
-  resource_group_name = var.resource_group_name
-  description         = "Fires when a Conditional Access policy is created, updated, or deleted"
-  severity            = 2
-  enabled             = true
+  name                  = "alert-${var.resource_prefix}-ca-policy-modified"
+  location              = var.location
+  resource_group_name   = var.resource_group_name
+  description           = "Fires when a Conditional Access policy is created, updated, or deleted"
+  severity              = 2
+  enabled               = true
   skip_query_validation = true
-  evaluation_frequency = "PT5M"
-  window_duration      = "PT5M"
+  evaluation_frequency  = "PT5M"
+  window_duration       = "PT5M"
 
   scopes = [azurerm_log_analytics_workspace.this.id]
 
@@ -253,15 +253,15 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ca_policy_change" {
 # ALERT 4 — Sign-in from Outside Trusted Locations
 # Detects: User signing in from an unexpected geography
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "signin_outside_trusted" {
-  name                = "alert-${var.resource_prefix}-signin-untrusted-location"
-  location            = var.location
-  resource_group_name = var.resource_group_name
-  description         = "Fires on successful sign-ins flagged as outside trusted locations"
-  severity            = 3
-  enabled             = true
+  name                  = "alert-${var.resource_prefix}-signin-untrusted-location"
+  location              = var.location
+  resource_group_name   = var.resource_group_name
+  description           = "Fires on successful sign-ins flagged as outside trusted locations"
+  severity              = 3
+  enabled               = true
   skip_query_validation = true
-  evaluation_frequency = "PT15M"
-  window_duration      = "PT15M"
+  evaluation_frequency  = "PT15M"
+  window_duration       = "PT15M"
 
   scopes     = [azurerm_log_analytics_workspace.this.id]
   depends_on = [azurerm_monitor_aad_diagnostic_setting.this]
@@ -302,15 +302,15 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "signin_outside_truste
 # ALERT 5 — MFA Registration by New User
 # Detects: A new MFA method registered — useful for detecting account takeover
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "mfa_registration" {
-  name                = "alert-${var.resource_prefix}-new-mfa-registration"
-  location            = var.location
-  resource_group_name = var.resource_group_name
-  description         = "Fires when a user registers a new MFA method"
-  severity            = 3
-  enabled             = true
+  name                  = "alert-${var.resource_prefix}-new-mfa-registration"
+  location              = var.location
+  resource_group_name   = var.resource_group_name
+  description           = "Fires when a user registers a new MFA method"
+  severity              = 3
+  enabled               = true
   skip_query_validation = true
-  evaluation_frequency = "PT5M"
-  window_duration      = "PT5M"
+  evaluation_frequency  = "PT5M"
+  window_duration       = "PT5M"
 
   scopes = [azurerm_log_analytics_workspace.this.id]
 
@@ -347,15 +347,15 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "mfa_registration" {
 # ALERT 6 — PIM Role Activated Outside Business Hours
 # Detects: Privileged role activated at unusual time — potential compromise
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "pim_outside_hours" {
-  name                = "alert-${var.resource_prefix}-pim-activation-outside-hours"
-  location            = var.location
-  resource_group_name = var.resource_group_name
-  description         = "Fires when a PIM role is activated outside 08:00-18:00 UTC"
-  severity            = 2
-  enabled             = true
+  name                  = "alert-${var.resource_prefix}-pim-activation-outside-hours"
+  location              = var.location
+  resource_group_name   = var.resource_group_name
+  description           = "Fires when a PIM role is activated outside 08:00-18:00 UTC"
+  severity              = 2
+  enabled               = true
   skip_query_validation = true
-  evaluation_frequency = "PT5M"
-  window_duration      = "PT5M"
+  evaluation_frequency  = "PT5M"
+  window_duration       = "PT5M"
 
   scopes = [azurerm_log_analytics_workspace.this.id]
 
