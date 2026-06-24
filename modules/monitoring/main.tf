@@ -216,7 +216,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "bulk_user_deletion" {
     | where DeletionCount >= 3
   KQL
 
-  
+
 
   entity_mapping {
     entity_type = "Account"
@@ -258,7 +258,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "ca_policy_change" {
     | project TimeGenerated, InitiatedBy, PolicyName, ChangeType
   KQL
 
-  
+
 
   entity_mapping {
     entity_type = "Account"
@@ -340,7 +340,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "mfa_registration" {
     | project TimeGenerated, InitiatedBy, AuthMethod
   KQL
 
-  
+
 
   entity_mapping {
     entity_type = "Account"
@@ -435,7 +435,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "impossible_travel" {
     | project UserPrincipalName, DistanceKm, Location1 = L1, Location2 = L2, TimeGenerated
   KQL
 
-  
+
 
   entity_mapping {
     entity_type = "Account"
@@ -465,7 +465,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "new_admin_role" {
   scopes                = [azurerm_log_analytics_workspace.this.id]
 
   criteria {
-    query = <<-KQL
+    query                   = <<-KQL
       AuditLogs
       | where OperationName in ("Add member to role", "Add eligible member to role")
       | where Result == "success"
@@ -506,7 +506,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "bulk_user_deletion" {
   scopes                = [azurerm_log_analytics_workspace.this.id]
 
   criteria {
-    query = <<-KQL
+    query                   = <<-KQL
       AuditLogs
       | where OperationName == "Delete user"
       | where Result == "success"
@@ -547,7 +547,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ca_policy_change" {
   scopes                = [azurerm_log_analytics_workspace.this.id]
 
   criteria {
-    query = <<-KQL
+    query                   = <<-KQL
       AuditLogs
       | where OperationName in (
           "Add conditional access policy",
@@ -593,7 +593,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "signin_outside_truste
   depends_on            = [azurerm_monitor_aad_diagnostic_setting.this]
 
   criteria {
-    query = <<-KQL
+    query                   = <<-KQL
       SignInLogs
       | where ResultType == 0
       | where NetworkLocationDetails !contains "trustedNamedLocation"
@@ -634,7 +634,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "mfa_registration" {
   scopes                = [azurerm_log_analytics_workspace.this.id]
 
   criteria {
-    query = <<-KQL
+    query                   = <<-KQL
       AuditLogs
       | where OperationName == "User registered security info"
       | where Result == "success"
@@ -674,7 +674,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "pim_outside_hours" {
   scopes                = [azurerm_log_analytics_workspace.this.id]
 
   criteria {
-    query = <<-KQL
+    query                   = <<-KQL
       AuditLogs
       | where OperationName == "Add member to role completed (PIM activation)"
       | where Result == "success"
