@@ -3,7 +3,7 @@
 
 # Log Analytics Workspace
 resource "azurerm_log_analytics_workspace" "this" {
-  name                = "law-${var.resource_prefix}-iam"
+  name                = "law-${var.resource_prefix}-iam-2"
   location            = var.location
   resource_group_name = var.resource_group_name
   sku                 = "PerGB2018"
@@ -113,6 +113,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "new_admin_role" {
   description         = "Fires when a user is added to a privileged directory role"
   severity            = 2
   enabled             = true
+  skip_query_validation = true
 
   evaluation_frequency = "PT5M"
   window_duration      = "PT5M"
@@ -159,6 +160,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "bulk_user_deletion" {
   description         = "Fires when 3 or more users are deleted within 5 minutes"
   severity            = 1
   enabled             = true
+  skip_query_validation = true
 
   evaluation_frequency = "PT5M"
   window_duration      = "PT5M"
@@ -205,7 +207,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ca_policy_change" {
   description         = "Fires when a Conditional Access policy is created, updated, or deleted"
   severity            = 2
   enabled             = true
-
+  skip_query_validation = true
   evaluation_frequency = "PT5M"
   window_duration      = "PT5M"
 
@@ -257,7 +259,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "signin_outside_truste
   description         = "Fires on successful sign-ins flagged as outside trusted locations"
   severity            = 3
   enabled             = true
-
+  skip_query_validation = true
   evaluation_frequency = "PT15M"
   window_duration      = "PT15M"
 
@@ -306,7 +308,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "mfa_registration" {
   description         = "Fires when a user registers a new MFA method"
   severity            = 3
   enabled             = true
-
+  skip_query_validation = true
   evaluation_frequency = "PT5M"
   window_duration      = "PT5M"
 
@@ -351,7 +353,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "pim_outside_hours" {
   description         = "Fires when a PIM role is activated outside 08:00-18:00 UTC"
   severity            = 2
   enabled             = true
-
+  skip_query_validation = true
   evaluation_frequency = "PT5M"
   window_duration      = "PT5M"
 
