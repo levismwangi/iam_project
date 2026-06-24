@@ -34,6 +34,7 @@ flowchart TB
     Sentinel --> Alert5["New MFA method registered"]
     Sentinel --> Alert6["PIM activation outside hours"]
     Sentinel --> Alert7["Impossible travel"]
+    Sentinel --> Alert8["Sentinel scheduled analytics rules"]
 
     style Tenant fill:#e8f0fe,stroke:#4285f4
     style CA fill:#fef7e0,stroke:#f9ab00
@@ -55,8 +56,16 @@ flowchart LR
     Gate -->|dev: no approval needed| ApplyDev["Apply to dev"]
     Gate -->|prod: required reviewer| ApplyProd["Apply to prod"]
 
+    DestroyTrigger["Manual dispatch\ndestroy.yml"] --> Confirm["confirm job\ntype 'destroy'"]
+    Confirm --> DestroyGate{"GitHub Environment\napproval gate"}
+    DestroyGate -->|dev| DestroyDev["Destroy dev"]
+    DestroyGate -->|prod: required reviewer| DestroyProd["Destroy prod"]
+
     style Gate fill:#fef7e0,stroke:#f9ab00
     style ApplyProd fill:#fce8e6,stroke:#ea4335
+    style DestroyGate fill:#fef7e0,stroke:#f9ab00
+    style DestroyProd fill:#fce8e6,stroke:#ea4335
+    style Confirm fill:#fce8e6,stroke:#ea4335
 ```
 
 
@@ -109,10 +118,14 @@ Grant the SP these **Microsoft Graph API permissions** (App registrations → AP
 | `Policy.ReadWrite.ConditionalAccess` | Create and update CA policies |
 | `RoleManagement.ReadWrite.Directory` | Assign Entra ID roles |
 | `PrivilegedAccess.ReadWrite.AzureAD` | Configure PIM policies and assignments |
+| `RoleEligibilitySchedule.ReadWrite.Directory` | Read, update, and delete eligible role assignments |
+| `User.ReadWrite.All` | Create, update, and delete user accounts |
 
 > **Important:** All Graph API permissions require **admin consent** — granting the permission alone is not sufficient. Without consent, Terraform apply will fail with `Authorization_RequestDenied (403)`.
 
 > **Note:** Use `Application.ReadWrite.All` and not `Application.ReadWrite.OwnedBy` — the narrower permission does not allow creating service principals or managing app passwords, which will cause 403 errors on `azuread_service_principal` and `azuread_application_password` resources.
+
+> **Note:** `User.ReadWrite.All` is required for `terraform destroy` — without it the pipeline will fail with 403 when attempting to delete Entra ID users, even if apply succeeds.
 
 Also assign the SP the **Security Administrator** Entra ID role to allow managing diagnostic settings:
 
@@ -305,11 +318,19 @@ az role assignment create \
   --scope "/subscriptions/<sub-id>/resourcegroups/<rg>/providers/Microsoft.KeyVault/vaults/<vault-name>"
 ```
 
+### 403 on destroy — user deletion fails
+If `terraform destroy` fails with `Authorization_RequestDenied` when deleting Entra ID users, the SP is missing `User.ReadWrite.All`.
+
+**Fix:** Entra ID → App registrations → your SP → API permissions → Add `User.ReadWrite.All` (Application) → Grant admin consent → re-run destroy.
+
+
 ---
 
 ## CI/CD Pipeline
 
-The GitHub Actions pipeline (`.github/workflows/terraform.yml`) has 3 jobs:
+The project uses two workflow files under `.github/workflows/`:
+
+### `terraform.yml` — main pipeline
 
 | Job | Trigger | What it does |
 |-----|---------|-------------|
@@ -317,7 +338,19 @@ The GitHub Actions pipeline (`.github/workflows/terraform.yml`) has 3 jobs:
 | `plan` | Every push/PR + manual dispatch | Plans against target environment, posts diff as PR comment |
 | `apply` | Manual dispatch (`action=apply`) | Applies the saved plan after environment approval gate |
 
-The pipeline supports two environments (`dev` / `prod`) selected at dispatch time, each using its own federated credential and set of GitHub secrets.
+A nightly scheduled run (02:00 UTC) runs `plan` against prod in read-only mode to detect drift — any difference between live infrastructure and Terraform state is flagged as a warning in the Actions log.
+
+### `destroy.yml` — standalone destroy pipeline
+
+Kept intentionally separate from the main pipeline to reduce the risk of accidental invocation. Only triggered manually via `workflow_dispatch`.
+
+**Two-layer protection before anything is deleted:**
+1. A `confirm` job that fails immediately if the input field doesn't contain the word `destroy` exactly
+2. The GitHub Environment approval gate, which requires a designated reviewer to approve before the destroy job runs
+
+To invoke: **Actions → Terraform Destroy → Run workflow → select environment → type `destroy` → Run workflow**
+
+> The destroy workflow shares the same concurrency group as the main pipeline (`terraform-<environment>`), so a running apply will block a destroy and vice versa.
 
 ### Required GitHub Secrets
 
@@ -333,6 +366,7 @@ The pipeline supports two environments (`dev` / `prod`) selected at dispatch tim
 | `AZURE_TENANT_ID_PROD` | Tenant ID (PROD) |
 | `AZURE_TENANT_DOMAIN_PROD` | e.g. `contoso.onmicrosoft.com` (PROD) |
 | `TF_STATE_ACCESS_KEY_PROD` | Storage account access key for state (PROD) |
+| `ALERT_EMAIL` | Email address for Azure Monitor action group alerts |
 
 > `AZURE_CLIENT_SECRET` is intentionally absent — OIDC eliminates the need for it.
 
@@ -341,7 +375,7 @@ The pipeline supports two environments (`dev` / `prod`) selected at dispatch tim
 Go to **GitHub repo → Settings → Environments → New environment:**
 
 - Create `dev` — no protection rules needed
-- Create `prod` — add **Required reviewers** (add yourself) so prod requires manual approval before applying
+- Create `prod` — add **Required reviewers** (add yourself) so prod requires manual approval before applying or destroying
 
 ---
 
@@ -359,20 +393,24 @@ Go to **GitHub repo → Settings → Environments → New environment:**
 | `terraform.tfvars` in `.gitignore` | Prevents credentials leaking to Git |
 | Key Vault Secrets User (not Owner) on SP | Least-privilege — read-only access to secrets |
 | Passwords stored in Key Vault | Never hardcoded — fetched at apply time, marked sensitive |
+| Destroy in a separate workflow file | Reduces accidental invocation risk; requires typed confirmation + approval gate |
 
 ---
 
 ## Monitoring — Alert Summary
 
-| Alert | Severity | Detection Window |
-|-------|----------|-----------------|
-| New admin role assignment | Medium | Immediate |
-| Bulk user deletion (3+) | High | 5 min |
-| CA policy modified/deleted | Medium | Immediate |
-| Sign-in from risky location | Low | 15 min |
-| New MFA method registered | Low | Immediate |
-| PIM activation outside hours | Medium | Immediate |
-| Impossible travel | High | 1 hr (Sentinel) |
+| Alert | Severity | Detection Window | Source |
+|-------|----------|-----------------|--------|
+| New admin role assignment | Medium | Immediate | Log Analytics |
+| Bulk user deletion (3+) | High | 5 min | Log Analytics |
+| CA policy modified/deleted | Medium | Immediate | Log Analytics |
+| Sign-in from risky location | Low | 15 min | Log Analytics |
+| New MFA method registered | Low | Immediate | Log Analytics |
+| PIM activation outside hours | Medium | Immediate | Log Analytics |
+| Impossible travel | High | 1 hr | Sentinel scheduled analytics rule |
+| Sentinel scheduled analytics rules | High | Configurable | Microsoft Sentinel |
+
+Sentinel scheduled analytics rules are provisioned via the monitoring module (`azurerm_sentinel_alert_rule_scheduled`) and run KQL queries on a defined cadence against the Log Analytics workspace. See `modules/monitoring/main.tf` for rule definitions.
 
 ---
 
@@ -383,6 +421,6 @@ Go to **GitHub repo → Settings → Environments → New environment:**
 - Zero-trust security design
 - Just-in-time privileged access (PIM)
 - KQL query writing for threat detection
-- Microsoft Sentinel SIEM integration
+- Microsoft Sentinel SIEM integration with scheduled analytics rules
 - GitHub Actions CI/CD with OIDC Workload Identity Federation
 - Security scanning (Checkov, TFLint)
