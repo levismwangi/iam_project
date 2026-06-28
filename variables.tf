@@ -235,3 +235,15 @@ variable "log_retention_days" {
   type        = number
   default     = 30
 }
+
+# Bootstrap / Key Vault
+variable "key_vault_name" {
+  description = "Name of the Key Vault used to store the temporary user password"
+  type        = string
+}
+
+variable "bootstrap_resource_group_name" {
+  description = "Name of the resource group containing the Key Vault and Terraform state storage"
+  type        = string
+  default     = "rg-terraform-state"
+}

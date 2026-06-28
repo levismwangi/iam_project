@@ -68,6 +68,7 @@ flowchart LR
     style Confirm fill:#fce8e6,stroke:#ea4335
 ```
 
+---
 
 ## Prerequisites
 
@@ -76,13 +77,52 @@ flowchart LR
 | Terraform CLI | >= 1.6.0 | IaC engine |
 | Azure CLI | Latest | Authentication |
 | Git | Any | Version control |
+| jq | Any | Required by bootstrap script |
 | VS Code + HCL extension | Any | IDE |
 
 ---
 
 ## Initial Setup
 
-### 1. Get a Tenant with the Required Licenses
+### Option A — Bootstrap script (recommended)
+
+A `bootstrap.sh` script is included in the repo root that automates all manual setup steps. Run it once before `terraform init`.
+
+```bash
+chmod +x bootstrap.sh
+./bootstrap.sh
+```
+
+The script will prompt for:
+- Tenant ID and Subscription ID
+- Tenant domain (e.g. `contoso.onmicrosoft.com`)
+- Company / project name
+- GitHub org and repo name
+- Azure region
+- Alert email
+
+It then handles everything in order:
+1. Creates the Service Principal with Contributor role
+2. Grants all required Microsoft Graph API permissions and admin consent
+3. Assigns the Security Administrator role to the SP
+4. Configures OIDC federated credentials (main, dev environment, PR)
+5. Creates the remote state resource group, storage account, and container
+6. Creates the Key Vault and grants your account Secrets Officer access
+7. Grants the SP Key Vault Secrets User access
+8. Prompts for the temporary user password and stores it in Key Vault
+9. Generates `terraform.tfvars` automatically
+10. Patches `providers.tf` with your storage account name
+11. Prints all required GitHub secrets with their values
+
+At the end, copy the printed secrets into **GitHub → Settings → Secrets → Actions**, then proceed to [Deploy](#deploy).
+
+---
+
+### Option B — Manual setup
+
+If you prefer to run the steps yourself, follow the sections below.
+
+#### 1. Get a Tenant with the Required Licenses
 
 This project requires **Entra ID P2** for the full feature set (Conditional Access + PIM). The following options all work:
 
@@ -98,7 +138,7 @@ This project requires **Entra ID P2** for the full feature set (Conditional Acce
 
 ---
 
-### 2. Create a Service Principal for Terraform
+#### 2. Create a Service Principal for Terraform
 
 ```bash
 az login --tenant <your-tenant-id>
@@ -136,21 +176,31 @@ Also assign the SP the **Security Administrator** Entra ID role to allow managin
 
 ---
 
-### 3. Configure OIDC Federated Identity (No Client Secrets)
+#### 3. Configure OIDC Federated Identity (No Client Secrets)
 
 This project uses **OIDC (Workload Identity Federation)** — GitHub exchanges a short-lived JWT with Azure on every run. No client secrets are stored anywhere.
 
-#### Create federated credentials
+```bash
+az ad app federated-credential create --id <APP_CLIENT_ID> --parameters '{
+  "name": "github-main",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:<org>/<repo>:ref:refs/heads/main",
+  "audiences": ["api://AzureADTokenExchange"]
+}'
 
-```powershell
-# Create JSON files (avoids PowerShell quoting issues)
-'{"name":"github-main","issuer":"https://token.actions.githubusercontent.com","subject":"repo:<org>/<repo>:ref:refs/heads/main","audiences":["api://AzureADTokenExchange"]}' | Out-File github-main.json
-'{"name":"github-env-dev","issuer":"https://token.actions.githubusercontent.com","subject":"repo:<org>/<repo>:environment:dev","audiences":["api://AzureADTokenExchange"]}' | Out-File github-env-dev.json
-'{"name":"github-pr","issuer":"https://token.actions.githubusercontent.com","subject":"repo:<org>/<repo>:pull_request","audiences":["api://AzureADTokenExchange"]}' | Out-File github-pr.json
+az ad app federated-credential create --id <APP_CLIENT_ID> --parameters '{
+  "name": "github-env-dev",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:<org>/<repo>:environment:dev",
+  "audiences": ["api://AzureADTokenExchange"]
+}'
 
-az ad app federated-credential create --id <APP_CLIENT_ID> --parameters github-main.json
-az ad app federated-credential create --id <APP_CLIENT_ID> --parameters github-env-dev.json
-az ad app federated-credential create --id <APP_CLIENT_ID> --parameters github-pr.json
+az ad app federated-credential create --id <APP_CLIENT_ID> --parameters '{
+  "name": "github-pr",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:<org>/<repo>:pull_request",
+  "audiences": ["api://AzureADTokenExchange"]
+}'
 ```
 
 Each credential maps to a different pipeline trigger:
@@ -163,93 +213,9 @@ Each credential maps to a different pipeline trigger:
 
 > Use the exact GitHub repo name (case-sensitive). If OIDC auth fails, check the `Azure Login` step logs — it shows the exact subject string GitHub is sending.
 
-#### Configure providers.tf
-
-```hcl
-provider "azurerm" {
-  features {}
-  use_oidc = true
-}
-
-provider "azuread" {
-  use_oidc = true
-}
-```
-
 ---
 
-### 4. Grant Key Vault Access to the Service Principal
-
-```bash
-az role assignment create \
-  --role "Key Vault Secrets User" \
-  --assignee <APP_CLIENT_ID> \
-  --scope "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RG_NAME>/providers/Microsoft.KeyVault/vaults/<VAULT_NAME>"
-```
-
-> Role assignments can take 1–2 minutes to propagate. If you see a 403 immediately after granting access, wait and re-run.
-
----
-
-### 5. Create and Store the Temp Password Secret in Key Vault
-
-Terraform reads the temporary user password from Key Vault at apply time — it is never hardcoded in the codebase.
-
-#### Create the Key Vault
-
-```bash
-az keyvault create \
-  --name kv-iam-<yourname> \
-  --resource-group rg-terraform-state \
-  --location eastus \
-  --sku standard
-```
-
-#### Grant yourself access to manage secrets
-
-```bash
-# Get your object ID
-az ad signed-in-user show --query id -o tsv
-
-# Assign Key Vault Secrets Officer role
-az role assignment create \
-  --role "Key Vault Secrets Officer" \
-  --assignee <your-object-id> \
-  --scope "/subscriptions/<subscription-id>/resourcegroups/rg-terraform-state/providers/Microsoft.KeyVault/vaults/kv-iam-<yourname>"
-```
-
-Wait 30 seconds for the role to propagate before proceeding.
-
-#### Store the temporary password securely
-
-The password is assigned to all new users on first login and must be changed immediately. Must meet Azure AD complexity requirements — 8+ characters, uppercase, lowercase, number, and special character.
-
-```powershell
-# Prompts for password without showing it on screen
-$password = Read-Host -AsSecureString "Enter temp password"
-$plaintext = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-  [Runtime.InteropServices.Marshal]::SecureStringToBSTR($password)
-)
-az keyvault secret set `
-  --vault-name kv-iam-<yourname> `
-  --name "user-temp-password" `
-  --value $plaintext `
-  --query "{name:name, id:id}" `
-  -o table
-```
-
-> The `--query` flag suppresses the secret value from the output — only the name and ID are printed.
-
-#### Update terraform.tfvars
-
-```hcl
-key_vault_name                = "kv-iam-<yourname>"
-bootstrap_resource_group_name = "rg-terraform-state"
-```
-
----
-
-### 6. Create Terraform Remote State Storage
+#### 4. Create Terraform Remote State Storage
 
 ```bash
 az group create --name rg-terraform-state --location eastus
@@ -267,7 +233,45 @@ az storage container create \
 
 ---
 
-### 7. Configure Variables
+#### 5. Create Key Vault and Store Temp Password
+
+```bash
+az keyvault create \
+  --name kv-iam-<yourname> \
+  --resource-group rg-terraform-state \
+  --location eastus \
+  --sku standard
+
+# Grant yourself Secrets Officer access
+az role assignment create \
+  --role "Key Vault Secrets Officer" \
+  --assignee <your-object-id> \
+  --scope "/subscriptions/<subscription-id>/resourcegroups/rg-terraform-state/providers/Microsoft.KeyVault/vaults/kv-iam-<yourname>"
+```
+
+Wait 30 seconds for the role to propagate, then store the password:
+
+```bash
+az keyvault secret set \
+  --vault-name kv-iam-<yourname> \
+  --name "user-temp-password" \
+  --value "<your-temp-password>" \
+  --query "{name:name, id:id}" \
+  -o table
+```
+
+Grant the SP read access to the vault:
+
+```bash
+az role assignment create \
+  --role "Key Vault Secrets User" \
+  --assignee <APP_CLIENT_ID> \
+  --scope "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/rg-terraform-state/providers/Microsoft.KeyVault/vaults/kv-iam-<yourname>"
+```
+
+---
+
+#### 6. Configure Variables
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
@@ -278,7 +282,7 @@ cp terraform.tfvars.example terraform.tfvars
 
 ---
 
-### 8. Deploy
+## Deploy
 
 ```bash
 terraform init
@@ -323,7 +327,6 @@ If `terraform destroy` fails with `Authorization_RequestDenied` when deleting En
 
 **Fix:** Entra ID → App registrations → your SP → API permissions → Add `User.ReadWrite.All` (Application) → Grant admin consent → re-run destroy.
 
-
 ---
 
 ## CI/CD Pipeline
@@ -361,14 +364,11 @@ To invoke: **Actions → Terraform Destroy → Run workflow → select environme
 | `AZURE_TENANT_ID_DEV` | Tenant ID (DEV) |
 | `AZURE_TENANT_DOMAIN_DEV` | e.g. `contoso.onmicrosoft.com` (DEV) |
 | `TF_STATE_ACCESS_KEY_DEV` | Storage account access key for state (DEV) |
-| `AZURE_CLIENT_ID_PROD` | App registration client ID (PROD) |
-| `AZURE_SUBSCRIPTION_ID_PROD` | Subscription ID (PROD) |
-| `AZURE_TENANT_ID_PROD` | Tenant ID (PROD) |
-| `AZURE_TENANT_DOMAIN_PROD` | e.g. `contoso.onmicrosoft.com` (PROD) |
-| `TF_STATE_ACCESS_KEY_PROD` | Storage account access key for state (PROD) |
 | `ALERT_EMAIL` | Email address for Azure Monitor action group alerts |
 
 > `AZURE_CLIENT_SECRET` is intentionally absent — OIDC eliminates the need for it.
+
+> If you used `bootstrap.sh`, all secret values are printed at the end of the script — no need to look them up manually.
 
 ### Setting Up GitHub Environments
 
@@ -408,7 +408,6 @@ Go to **GitHub repo → Settings → Environments → New environment:**
 | New MFA method registered | Low | Immediate | Log Analytics |
 | PIM activation outside hours | Medium | Immediate | Log Analytics |
 | Impossible travel | High | 1 hr | Sentinel scheduled analytics rule |
-| Sentinel scheduled analytics rules | High | Configurable | Microsoft Sentinel |
 
 Sentinel scheduled analytics rules are provisioned via the monitoring module (`azurerm_sentinel_alert_rule_scheduled`) and run KQL queries on a defined cadence against the Log Analytics workspace. See `modules/monitoring/main.tf` for rule definitions.
 
