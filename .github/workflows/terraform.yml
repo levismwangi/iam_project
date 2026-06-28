@@ -291,7 +291,7 @@ jobs:
           path: ${{ env.WORKING_DIR }}
 
       # Re-checks the plan against current state right before applying.
-      # If something changed between plan and apply (e.g. manual portal edit,
+      # If something changed between plan and apply (e.g. manual portal edit ,
       # or someone else's apply landed first), this catches it instead of
       # blindly applying a now-stale plan.
       - name: Verify plan is still current
