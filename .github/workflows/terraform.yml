@@ -145,6 +145,7 @@ jobs:
           echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_DEV }}" >> $GITHUB_ENV
           echo "TF_VAR_tenant_domain=${{ secrets.AZURE_TENANT_DOMAIN_DEV }}" >> $GITHUB_ENV
           echo "TF_VAR_alert_email=${{ secrets.ALERT_EMAIL }}" >> $GITHUB_ENV
+          echo "TF_VAR_key_vault_name=${{ secrets.KEY_VAULT_NAME_DEV }}" >> $GITHUB_ENV
 
       - name: Set Terraform ARM env vars (PROD)
         if: ${{ github.event_name == 'schedule' || github.event.inputs.environment == 'prod' }}
@@ -158,6 +159,7 @@ jobs:
           echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_PROD }}" >> $GITHUB_ENV
           echo "TF_VAR_tenant_domain=${{ secrets.AZURE_TENANT_DOMAIN_PROD }}" >> $GITHUB_ENV
           echo "TF_VAR_alert_email=${{ secrets.ALERT_EMAIL }}" >> $GITHUB_ENV
+          echo "TF_VAR_key_vault_name=${{ secrets.KEY_VAULT_NAME_PROD }}" >> $GITHUB_ENV
 
       - name: Terraform Init
         run: terraform init
@@ -262,6 +264,7 @@ jobs:
           echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_DEV }}" >> $GITHUB_ENV
           echo "TF_VAR_tenant_domain=${{ secrets.AZURE_TENANT_DOMAIN_DEV }}" >> $GITHUB_ENV
           echo "TF_VAR_alert_email=${{ secrets.ALERT_EMAIL }}" >> $GITHUB_ENV
+          echo "TF_VAR_key_vault_name=${{ secrets.KEY_VAULT_NAME_DEV }}" >> $GITHUB_ENV
 
       - name: Set Terraform ARM env vars (PROD)
         if: ${{ github.event.inputs.environment == 'prod' }}
@@ -275,6 +278,7 @@ jobs:
           echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_PROD }}" >> $GITHUB_ENV
           echo "TF_VAR_tenant_domain=${{ secrets.AZURE_TENANT_DOMAIN_PROD }}" >> $GITHUB_ENV
           echo "TF_VAR_alert_email=${{ secrets.ALERT_EMAIL }}" >> $GITHUB_ENV
+          echo "TF_VAR_key_vault_name=${{ secrets.KEY_VAULT_NAME_PROD }}" >> $GITHUB_ENV
 
       - name: Terraform Init
         run: terraform init
