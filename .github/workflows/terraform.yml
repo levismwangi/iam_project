@@ -10,10 +10,10 @@ on:
   pull_request:
     branches:
       - main
-  schedule:
-    # Nightly drift detection — catches manual changes made outside Terraform
-    # (e.g. someone edits a Conditional Access policy directly in the Entra portal)
-    - cron: "0 2 * * *"
+  # Nightly drift detection — disabled until a prod environment exists.
+  # Re-enable once prod secrets (AZURE_*_PROD, KEY_VAULT_NAME_PROD) are configured.
+  # schedule:
+  #   - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
       environment:
@@ -291,7 +291,7 @@ jobs:
           path: ${{ env.WORKING_DIR }}
 
       # Re-checks the plan against current state right before applying.
-      # If something changed between plan and apply (e.g. manual portal edit ,
+      # If something changed between plan and apply (e.g. manual portal edit,
       # or someone else's apply landed first), this catches it instead of
       # blindly applying a now-stale plan.
       - name: Verify plan is still current

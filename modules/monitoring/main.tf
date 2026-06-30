@@ -285,7 +285,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "signin_outside_trusted" {
   trigger_threshold          = 0
   tactics                    = ["InitialAccess"]
   techniques                 = ["T1078"]
-  depends_on                 = [azurerm_monitor_aad_diagnostic_setting.this]
+  depends_on                 = [azurerm_monitor_aad_diagnostic_setting.this, azurerm_sentinel_log_analytics_workspace_onboarding.this]
 
   query = <<-KQL
     SignInLogs
@@ -409,7 +409,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "impossible_travel" {
   trigger_threshold          = 0
   tactics                    = ["InitialAccess"]
   techniques                 = ["T1078"]
-  depends_on                 = [azurerm_monitor_aad_diagnostic_setting.this]
+  depends_on                 = [azurerm_monitor_aad_diagnostic_setting.this, azurerm_sentinel_log_analytics_workspace_onboarding.this]
 
   query = <<-KQL
     let timeWindow = 60m;
@@ -753,7 +753,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "illicit_consent_grant" {
   trigger_operator           = "GreaterThan"
   trigger_threshold          = 0
   tactics                    = ["CredentialAccess", "Persistence"]
-  techniques                 = ["T1528", "T1550"]
+  techniques                 = ["T1528"]
   depends_on                 = [azurerm_sentinel_log_analytics_workspace_onboarding.this]
 
   # skip_query_validation intentionally NOT set here — this query only
