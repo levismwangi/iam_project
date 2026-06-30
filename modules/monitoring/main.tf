@@ -172,6 +172,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "new_admin_role" {
   KQL
 
 
+
   entity_mapping {
     entity_type = "Account"
     field_mapping {
@@ -269,7 +270,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "ca_policy_change" {
   }
 }
 
-/*
 # SENTINEL RULE 4 — Sign-in from Outside Trusted Locations
 # MITRE: Initial Access — T1078 (Valid Accounts)
 resource "azurerm_sentinel_alert_rule_scheduled" "signin_outside_trusted" {
@@ -298,6 +298,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "signin_outside_trusted" {
   KQL
 
 
+
   entity_mapping {
     entity_type = "Account"
     field_mapping {
@@ -314,8 +315,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "signin_outside_trusted" {
     }
   }
 }
-*/
-
 
 # SENTINEL RULE 5 — New MFA Registration
 # MITRE: Persistence — T1098 (Account Manipulation)
@@ -383,6 +382,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "pim_outside_hours" {
   KQL
 
 
+
   entity_mapping {
     entity_type = "Account"
     field_mapping {
@@ -392,9 +392,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "pim_outside_hours" {
   }
 }
 
-
-/*
-# SENTINEL RULE 7 — Impossible Travel 
+# SENTINEL RULE 7 — Impossible Travel (Phase 1 — uncommented)
 # MITRE: Initial Access — T1078 (Valid Accounts)
 # Detects: Same user signing in from two geographically distant locations
 # within a short time window
@@ -441,7 +439,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "impossible_travel" {
   KQL
 
 
-
   entity_mapping {
     entity_type = "Account"
     field_mapping {
@@ -450,8 +447,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "impossible_travel" {
     }
   }
 }
-
-*/
 
 # ============================================================
 # LEGACY SCHEDULED QUERY RULES
@@ -707,6 +702,101 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "pim_outside_hours" {
   tags = {
     managed_by = "terraform"
     alert_type = "pim"
+  }
+}
+
+# ============================================================
+# SENTINEL RULE 8 — Illicit Consent Grant (OAuth Token Theft)
+# MITRE: Credential Access / Persistence — T1528 (Steal Application
+# Access Token), T1550.001 (Use Alternate Authentication Material)
+#
+# THREAT MODEL
+# Unlike credential-based attacks, this technique never touches the
+# user's password and is invisible to MFA and Conditional Access.
+# The attacker tricks a user into granting OAuth consent to a
+# malicious multi-tenant app requesting high-privilege Graph scopes
+# (mail, files, directory). The app receives a refresh token that
+# persists independently of the user's password — surviving password
+# resets and even MFA re-enrollment — giving the attacker durable,
+# silent access to mailbox/file data with no further sign-in events
+# to alert on.
+#
+# DETECTION LOGIC
+# A single consent event is not inherently malicious — users grant
+# app consent constantly as part of normal SaaS adoption. The signal
+# here is the *combination* of:
+#   1. A consent event for a genuinely sensitive scope (not just
+#      profile/openid, but mail, files, or directory write access)
+#   2. The granting account itself, surfaced for triage
+# This intentionally avoids naive "any consent = alert" noise, which
+# is the most common reason consent-grant detections get disabled in
+# real SOCs within a week of going live.
+# ============================================================
+
+resource "azurerm_sentinel_alert_rule_scheduled" "illicit_consent_grant" {
+  name                       = "sentinel-${var.resource_prefix}-illicit-consent-grant"
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
+  display_name               = "Illicit Consent Grant — High-Privilege OAuth Scope"
+  description                = <<-DESC
+    Fires when a user grants OAuth consent to an application requesting
+    high-privilege Microsoft Graph scopes (mail, files, or directory
+    access). This pattern is consistent with consent phishing / illicit
+    consent grant attacks, where a malicious multi-tenant app is used to
+    obtain a persistent refresh token that bypasses MFA and survives
+    password resets. Investigate the application's publisher, age, and
+    tenant scope before assuming legitimacy.
+  DESC
+  severity                   = "High"
+  enabled                    = true
+  query_frequency            = "PT15M"
+  query_period               = "PT1H"
+  trigger_operator           = "GreaterThan"
+  trigger_threshold          = 0
+  tactics                    = ["CredentialAccess", "Persistence"]
+  techniques                 = ["T1528", "T1550"]
+  depends_on                 = [azurerm_sentinel_log_analytics_workspace_onboarding.this]
+
+  # skip_query_validation intentionally NOT set here — this query only
+  # references AuditLogs, which is already validated and flowing from
+  # the existing rules in this module.
+
+  query = <<-KQL
+    let HighRiskScopes = dynamic([
+      "Mail.Read", "Mail.ReadWrite", "Mail.Send",
+      "Files.Read.All", "Files.ReadWrite.All",
+      "Directory.Read.All", "Directory.ReadWrite.All",
+      "offline_access", "full_access_as_app"
+    ]);
+    AuditLogs
+    | where OperationName == "Consent to application"
+    | where Result == "success"
+    | extend AppDisplayName  = tostring(TargetResources[0].displayName)
+    | extend AppObjectId     = tostring(TargetResources[0].id)
+    | extend ConsentedBy     = tostring(InitiatedBy.user.userPrincipalName)
+    | extend ModifiedProps   = TargetResources[0].modifiedProperties
+    | mv-expand ModifiedProps
+    | extend PropName  = tostring(ModifiedProps.displayName)
+    | extend PropValue = tostring(ModifiedProps.newValue)
+    | where PropName == "ConsentAction.Permissions"
+    | where PropValue has_any (HighRiskScopes)
+    | project TimeGenerated, ConsentedBy, AppDisplayName, AppObjectId, GrantedScopes = PropValue
+    | summarize GrantEvents = count(), Scopes = make_set(GrantedScopes) by ConsentedBy, AppDisplayName, AppObjectId, bin(TimeGenerated, 15m)
+  KQL
+
+  entity_mapping {
+    entity_type = "Account"
+    field_mapping {
+      identifier  = "FullName"
+      column_name = "ConsentedBy"
+    }
+  }
+
+  entity_mapping {
+    entity_type = "AzureResource"
+    field_mapping {
+      identifier  = "ResourceId"
+      column_name = "AppObjectId"
+    }
   }
 }
 
