@@ -130,12 +130,19 @@ resource "azurerm_logic_app_workflow" "disable_user" {
   }
 }
 
+# Give the Logic app permission to act as a Sentinel Responder
+# (needed to update incidents and trigger responses)
+resource "time_sleep" "wait_for_logic_app_identity" {
+  depends_on      = [azurerm_logic_app_workflow.disable_user]
+  create_duration = "30s"
+}
 # Give the Logic App permission to act as a Sentinel Responder
 # (needed to update incidents and trigger responses)
 resource "azurerm_role_assignment" "logic_app_sentinel_responder" {
   scope                = azurerm_log_analytics_workspace.this.id
   role_definition_name = "Microsoft Sentinel Responder"
   principal_id         = azurerm_logic_app_workflow.disable_user.identity[0].principal_id
+  depends_on           = [azurerm_logic_app_workflow.disable_user]
 }
 
 # ============================================================
@@ -810,6 +817,10 @@ terraform {
     azurerm = {
       source  = "hashicorp/azurerm"
       version = "~> 3.90"
+    }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.11"
     }
   }
 }
