@@ -277,7 +277,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "ca_policy_change" {
   }
 }
 
-
+/*
 # SENTINEL RULE 4 — Sign-in from Outside Trusted Locations
 # MITRE: Initial Access — T1078 (Valid Accounts)
 resource "azurerm_sentinel_alert_rule_scheduled" "signin_outside_trusted" {
@@ -323,6 +323,8 @@ resource "azurerm_sentinel_alert_rule_scheduled" "signin_outside_trusted" {
     }
   }
 }
+
+*/
 
 # SENTINEL RULE 5 — New MFA Registration
 # MITRE: Persistence — T1098 (Account Manipulation)
@@ -400,7 +402,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "pim_outside_hours" {
   }
 }
 
-
+/*
 # SENTINEL RULE 7 — Impossible Travel (Phase 1 — uncommented)
 # MITRE: Initial Access — T1078 (Valid Accounts)
 # Detects: Same user signing in from two geographically distant locations
@@ -457,6 +459,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "impossible_travel" {
   }
 }
 
+*/
 
 # ============================================================
 # LEGACY SCHEDULED QUERY RULES
