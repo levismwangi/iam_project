@@ -41,10 +41,10 @@ resource "azurerm_resource_group" "iam" {
 # Logic App's managed identity. Constrained so it cannot assign any other
 # role or assign to any other principal type.
 resource "azurerm_role_assignment" "terraform_sp_rbac_admin" {
-  scope                 = azurerm_resource_group.iam.id
-  role_definition_name  = "Role Based Access Control Administrator"
-  principal_id          = var.terraform_sp_object_id
-  principal_type        = "ServicePrincipal"
+  scope                = azurerm_resource_group.iam.id
+  role_definition_name = "Role Based Access Control Administrator"
+  principal_id         = var.terraform_sp_object_id
+  principal_type       = "ServicePrincipal"
 
   condition_version = "2.0"
   condition         = <<-CONDITION
@@ -56,8 +56,8 @@ resource "azurerm_role_assignment" "terraform_sp_rbac_admin" {
 # Allows the Terraform SP to create and manage Sentinel analytics rules,
 # alert rules, and other Sentinel resources in the IAM resource group.
 resource "azurerm_role_assignment" "terraform_sp_sentinel_contributor" {
-  scope                 = azurerm_resource_group.iam.id
-  role_definition_name  = "Microsoft Sentinel Contributor"
-  principal_id          = var.terraform_sp_object_id
-  principal_type        = "ServicePrincipal"
+  scope                = azurerm_resource_group.iam.id
+  role_definition_name = "Microsoft Sentinel Contributor"
+  principal_id         = var.terraform_sp_object_id
+  principal_type       = "ServicePrincipal"
 }
