@@ -1,0 +1,151 @@
+name: Bootstrap Foundation
+
+# ============================================================
+# BOOTSTRAP PIPELINE — Run this ONCE before the first apply,
+# and after every full terraform destroy.
+#
+# What it does:
+#   - Runs foundation/ which creates the IAM resource group
+#     and grants the Terraform SP the roles it needs to deploy
+#     the monitoring module (RBAC Admin + Sentinel Contributor)
+#
+# When to run:
+#   - First time setting up a new environment
+#   - After terraform destroy wipes the IAM resource group
+#   - Never runs automatically — manual dispatch only
+#
+# Order of operations:
+#   1. Run this pipeline (bootstrap)
+#   2. Run terraform.yml with action=apply
+# ============================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (dev or prod)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
+      action:
+        description: "Terraform action"
+        required: true
+        default: "apply"
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+env:
+  TF_VERSION: "1.7.0"
+  WORKING_DIR: "foundation"
+
+concurrency:
+  group: bootstrap-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    name: "Foundation ${{ github.event.inputs.action }}"
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # ── Azure Login ──────────────────────────────────────────────────────────
+      - name: Azure Login (DEV)
+        if: ${{ github.event.inputs.environment == 'dev' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_DEV }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID_DEV }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}
+
+      - name: Azure Login (PROD)
+        if: ${{ github.event.inputs.environment == 'prod' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_PROD }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID_PROD }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}
+
+      # ── Resolve SP Object ID ─────────────────────────────────────────────────
+      # The foundation module needs the SP's object ID (not client/app ID)
+      # to create role assignments. We resolve it here from the client ID.
+      - name: Resolve SP Object ID (DEV)
+        if: ${{ github.event.inputs.environment == 'dev' }}
+        run: |
+          SP_OBJECT_ID=$(az ad sp show --id "${{ secrets.AZURE_CLIENT_ID_DEV }}" --query id -o tsv)
+          echo "TF_VAR_terraform_sp_object_id=$SP_OBJECT_ID" >> $GITHUB_ENV
+          echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_DEV }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID_DEV }}" >> $GITHUB_ENV
+          echo "ARM_ACCESS_KEY=${{ secrets.TF_STATE_ACCESS_KEY_DEV }}" >> $GITHUB_ENV
+          echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
+          echo "TF_VAR_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
+          echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_DEV }}" >> $GITHUB_ENV
+
+      - name: Resolve SP Object ID (PROD)
+        if: ${{ github.event.inputs.environment == 'prod' }}
+        run: |
+          SP_OBJECT_ID=$(az ad sp show --id "${{ secrets.AZURE_CLIENT_ID_PROD }}" --query id -o tsv)
+          echo "TF_VAR_terraform_sp_object_id=$SP_OBJECT_ID" >> $GITHUB_ENV
+          echo "ARM_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_PROD }}" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=${{ secrets.AZURE_TENANT_ID_PROD }}" >> $GITHUB_ENV
+          echo "ARM_ACCESS_KEY=${{ secrets.TF_STATE_ACCESS_KEY_PROD }}" >> $GITHUB_ENV
+          echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
+          echo "TF_VAR_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
+          echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_PROD }}" >> $GITHUB_ENV
+
+      # ── Set non-sensitive variables ──────────────────────────────────────────
+      - name: Set common variables
+        run: |
+          echo "TF_VAR_company_name=${{ vars.COMPANY_NAME }}" >> $GITHUB_ENV
+          echo "TF_VAR_environment=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+          echo "TF_VAR_location=${{ vars.AZURE_LOCATION }}" >> $GITHUB_ENV
+
+      # ── Terraform ────────────────────────────────────────────────────────────
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Terraform Validate
+        run: terraform validate -no-color
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -no-color \
+            -out=foundation.tfplan
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Terraform Apply
+        if: github.event.inputs.action == 'apply'
+        run: terraform apply -auto-approve foundation.tfplan
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: Terraform Destroy
+        if: github.event.inputs.action == 'destroy'
+        run: terraform destroy -auto-approve
+        working-directory: ${{ env.WORKING_DIR }}
+
+      # ── Post-apply summary ───────────────────────────────────────────────────
+      - name: Show foundation outputs
+        if: github.event.inputs.action == 'apply'
+        run: terraform output
+        working-directory: ${{ env.WORKING_DIR }}

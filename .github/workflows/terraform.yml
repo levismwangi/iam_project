@@ -1,5 +1,13 @@
 name: Terraform IAM Pipeline
 
+# ============================================================
+# MAIN PIPELINE — Deploys the IAM infrastructure.
+#
+# Prerequisites: bootstrap.yml must have been run first to
+# create the IAM resource group and grant the SP the necessary
+# roles. See .github/workflows/bootstrap.yml.
+# ============================================================
+
 on:
   push:
     branches:
@@ -37,8 +45,6 @@ env:
   TF_VERSION: "1.7.0"
   WORKING_DIR: "."
 
-# Prevents two runs from racing against the same state file —
-# e.g. a push to main and a manual dispatch targeting the same environment
 concurrency:
   group: terraform-${{ github.event.inputs.environment || 'dev' }}
   cancel-in-progress: false
@@ -74,9 +80,6 @@ jobs:
 
       - run: tflint --format compact --recursive
 
-      # Checkov blocks the pipeline on CRITICAL/HIGH findings instead of
-      # always passing. soft_fail only applies to LOW/MEDIUM so the scan still
-      # surfaces minor issues without blocking on them.
       - name: Checkov (block on HIGH/CRITICAL)
         uses: bridgecrewio/checkov-action@v12
         with:
@@ -86,131 +89,10 @@ jobs:
           hard_fail_on: HIGH,CRITICAL
           output_format: cli
 
-  # ── Pre-Apply Setup ──────────────────────────────────────────────────────────
-  # Runs before apply only. Ensures the IAM resource group exists and grants
-  # the Terraform SP the roles it needs to deploy the monitoring module:
-  #   - Role Based Access Control Administrator (constrained to Sentinel Responder)
-  #   - Microsoft Sentinel Contributor
-  #
-  # These roles live on the IAM resource group, which Terraform itself creates.
-  # That creates a bootstrap dependency: the SP needs the roles before it can
-  # deploy, but the resource group doesn't exist until Terraform runs.
-  # This job resolves that by creating the resource group and assigning the
-  # roles as a pipeline step, before the plan and apply jobs run.
-  #
-  # Safe to re-run — duplicate role assignments are detected and skipped.
-  setup:
-    name: "Pre-Apply Setup"
-    runs-on: ubuntu-latest
-    needs: validate
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
-
-    permissions:
-      id-token: write
-      contents: read
-
-    steps:
-      - name: Azure Login (DEV)
-        if: ${{ (github.event.inputs.environment || 'dev') != 'prod' }}
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID_DEV }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID_DEV }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}
-
-      - name: Azure Login (PROD)
-        if: ${{ github.event.inputs.environment == 'prod' }}
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID_PROD }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID_PROD }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}
-
-      - name: Set environment variables (DEV)
-        if: ${{ (github.event.inputs.environment || 'dev') != 'prod' }}
-        run: |
-          echo "SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
-          echo "CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_DEV }}" >> $GITHUB_ENV
-
-      - name: Set environment variables (PROD)
-        if: ${{ github.event.inputs.environment == 'prod' }}
-        run: |
-          echo "SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
-          echo "CLIENT_ID=${{ secrets.AZURE_CLIENT_ID_PROD }}" >> $GITHUB_ENV
-
-      - name: Ensure IAM resource group exists
-        run: |
-          ENV="${{ github.event.inputs.environment || 'dev' }}"
-          IAM_RG="rg-${{ vars.COMPANY_NAME }}-${ENV}-iam"
-          az group create \
-            --name "$IAM_RG" \
-            --location "${{ vars.AZURE_LOCATION }}" \
-            --output none
-          echo "IAM_RG=$IAM_RG" >> $GITHUB_ENV
-
-      - name: Assign Role Based Access Control Administrator (constrained)
-        run: |
-          SP_OBJECT_ID=$(az ad sp show --id "$CLIENT_ID" --query id -o tsv)
-          SENTINEL_RESPONDER_ID="3e150937-b8fe-4cfb-8069-0eaf05ecd056"
-          SCOPE="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$IAM_RG"
-
-          EXISTING=$(az role assignment list \
-            --assignee "$SP_OBJECT_ID" \
-            --scope "$SCOPE" \
-            --query "[?roleDefinitionName=='Role Based Access Control Administrator'].id" \
-            -o tsv 2>/dev/null || echo "")
-
-          if [[ -n "$EXISTING" ]]; then
-            echo "RBAC Administrator already assigned — skipping"
-          else
-            az role assignment create \
-              --assignee-object-id "$SP_OBJECT_ID" \
-              --assignee-principal-type ServicePrincipal \
-              --role "Role Based Access Control Administrator" \
-              --scope "$SCOPE" \
-              --condition "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$SENTINEL_RESPONDER_ID} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {'ServicePrincipal', 'ManagedIdentity'})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$SENTINEL_RESPONDER_ID} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {'ServicePrincipal', 'ManagedIdentity'}))" \
-              --condition-version "2.0" \
-              --output none
-            echo "RBAC Administrator assigned"
-          fi
-
-      - name: Assign Microsoft Sentinel Contributor
-        run: |
-          SP_OBJECT_ID=$(az ad sp show --id "$CLIENT_ID" --query id -o tsv)
-          SCOPE="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$IAM_RG"
-
-          EXISTING=$(az role assignment list \
-            --assignee "$SP_OBJECT_ID" \
-            --scope "$SCOPE" \
-            --query "[?roleDefinitionName=='Microsoft Sentinel Contributor'].id" \
-            -o tsv 2>/dev/null || echo "")
-
-          if [[ -n "$EXISTING" ]]; then
-            echo "Microsoft Sentinel Contributor already assigned — skipping"
-          else
-            az role assignment create \
-              --assignee-object-id "$SP_OBJECT_ID" \
-              --assignee-principal-type ServicePrincipal \
-              --role "Microsoft Sentinel Contributor" \
-              --scope "$SCOPE" \
-              --output none
-            echo "Microsoft Sentinel Contributor assigned"
-          fi
-
-      - name: Wait for role assignments to propagate
-        run: sleep 30
-
   plan:
     name: "Terraform Plan"
     runs-on: ubuntu-latest
-    needs: [validate, setup]
-    if: |
-      always() &&
-      needs.validate.result == 'success' &&
-      (needs.setup.result == 'success' || needs.setup.result == 'skipped')
-    # Scheduled drift detection runs do NOT use an environment — they only
-    # read state and run a plan, so there is nothing to gate. Approval gates
-    # are only needed for manual dispatches that could lead to an apply.
+    needs: validate
     environment: ${{ github.event_name != 'schedule' && (github.event.inputs.environment || 'dev') || '' }}
     outputs:
       exitcode: ${{ steps.plan.outputs.exitcode }}
@@ -283,9 +165,6 @@ jobs:
         run: terraform init
         working-directory: ${{ env.WORKING_DIR }}
 
-      # -detailed-exitcode: 0 = no changes, 1 = error, 2 = changes present.
-      # This is what makes drift detection meaningful — the workflow can react
-      # differently depending on whether drift was actually found.
       - name: Terraform Plan
         id: plan
         run: |
@@ -327,8 +206,6 @@ jobs:
           {
             echo "#### Terraform Plan — ${{ github.event.inputs.environment || 'dev' }} 🔍"
             echo '```'
-            # Show full plan, but cap at GitHub's comment size limits.
-            # Full plan.txt is always available as a workflow artifact above.
             tail -c 60000 plan.txt
             echo '```'
             echo "_Full plan available in the [workflow run artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})._"
@@ -339,7 +216,7 @@ jobs:
   apply:
     name: "Terraform Apply"
     runs-on: ubuntu-latest
-    needs: [plan, setup]
+    needs: plan
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
     environment: ${{ github.event.inputs.environment || 'dev' }}
 
@@ -408,10 +285,6 @@ jobs:
           name: tfplan-${{ github.event.inputs.environment || 'dev' }}-${{ github.run_id }}
           path: ${{ env.WORKING_DIR }}
 
-      # Re-checks the plan against current state right before applying.
-      # If something changed between plan and apply (e.g. manual portal edit,
-      # or someone else's apply landed first), this catches it instead of
-      # blindly applying a now-stale plan.
       - name: Verify plan is still current
         run: |
           set +e

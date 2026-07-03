@@ -1,23 +1,21 @@
 # ROOT main.tf — Wires all modules together
+#
+# NOTE: The IAM resource group is created by the foundation/ module,
+# not here. It is referenced via a data source below. Run the
+# bootstrap pipeline (bootstrap.yml) before the first apply.
 
 locals {
   resource_prefix = "${var.company_name}-${var.environment}"
 }
 
-
-# Resource Group (used by monitoring + PIM)
-resource "azurerm_resource_group" "iam" {
-  name     = "rg-${local.resource_prefix}-iam"
-  location = var.location
-
-  tags = {
-    environment = var.environment
-    managed_by  = "terraform"
-    project     = "iam-project"
-  }
+# ── IAM Resource Group (managed by foundation/) ───────────────────────────────
+# Created by foundation/main.tf. The bootstrap pipeline must run
+# before this root module to ensure the resource group exists.
+data "azurerm_resource_group" "iam" {
+  name = "rg-${local.resource_prefix}-iam"
 }
 
-# Module: Users
+# ── Module: Users ─────────────────────────────────────────────────────────────
 module "users" {
   source        = "./modules/users"
   users         = var.users
@@ -25,31 +23,28 @@ module "users" {
   temp_password = data.azurerm_key_vault_secret.temp_password.value
 }
 
-
-# Module: Groups
+# ── Module: Groups ────────────────────────────────────────────────────────────
 module "groups" {
-  source = "./modules/groups"
-
+  source       = "./modules/groups"
   departments  = var.departments
   users        = module.users.user_objects
   company_name = var.company_name
 }
 
-#Tenant is not licensed for Conditional Access, so this module is currently disabled. To enable, uncomment the module block below and ensure you have the appropriate licenses in place.
+# Tenant is not licensed for Conditional Access — module disabled.
+# Uncomment once Entra ID P2 license is available.
 /*
-# Module: Conditional Access
 module "conditional_access" {
-  source = "./modules/conditional_access"
-
+  source               = "./modules/conditional_access"
   it_group_object_id   = module.groups.group_object_ids["IT"]
   break_glass_group_id = module.groups.break_glass_group_id
   environment          = var.environment
 }
 */
-# Module: App Registrations
-module "app_registrations" {
-  source = "./modules/app_registrations"
 
+# ── Module: App Registrations ─────────────────────────────────────────────────
+module "app_registrations" {
+  source       = "./modules/app_registrations"
   applications = var.applications
   group_ids    = module.groups.group_object_ids
 
@@ -69,12 +64,12 @@ module "app_registrations" {
   }
 }
 
+# ── PIM locals ────────────────────────────────────────────────────────────────
 data "azurerm_role_definition" "reader" {
   name = "Reader"
 }
 
-data "azurerm_subscription" "primary" {
-}
+data "azurerm_subscription" "primary" {}
 
 locals {
   reader_role_definition_id = "${data.azurerm_subscription.primary.id}${data.azurerm_role_definition.reader.id}"
@@ -90,30 +85,27 @@ locals {
   }
 }
 
+# PIM module — disabled until Entra ID P2 license is available.
 /*
 module "pim" {
-  source = "./modules/pim"
-
+  source        = "./modules/pim"
   user_objects  = module.users.user_objects
   group_objects = module.groups.group_object_ids
-
   directory_role_eligible_assignments = var.pim_eligible_assignments
-  # group_eligible_assignments, rbac_eligible_assignments, etc. — add as needed
 }
 */
 
-# Module: Monitoring
+# ── Module: Monitoring ────────────────────────────────────────────────────────
 module "monitoring" {
-  source = "./modules/monitoring"
-
-  resource_group_name = azurerm_resource_group.iam.name
+  source              = "./modules/monitoring"
+  resource_group_name = data.azurerm_resource_group.iam.name
   location            = var.location
   resource_prefix     = local.resource_prefix
   alert_email         = var.alert_email
   log_retention_days  = var.log_retention_days
 }
 
-#Key Vault (used for storing temp password)
+# ── Key Vault (temp password) ─────────────────────────────────────────────────
 data "azurerm_key_vault" "this" {
   name                = "kv-iam-project"
   resource_group_name = "rg-terraform-state"

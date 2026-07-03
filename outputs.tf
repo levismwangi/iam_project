@@ -1,4 +1,4 @@
-# ROOT outputs.tf — Defines outputs for the entire project
+# ROOT outputs.tf
 
 output "user_object_ids" {
   description = "Object IDs of all created users"
@@ -32,12 +32,13 @@ output "conditional_access_policy_ids" {
   value       = module.conditional_access.policy_ids
 }
 */
+
 output "log_analytics_workspace_id" {
   description = "Resource ID of the Log Analytics workspace"
   value       = module.monitoring.log_analytics_workspace_id
 }
 
 output "resource_group_name" {
-  description = "Name of the IAM resource group"
-  value       = azurerm_resource_group.iam.name
+  description = "Name of the IAM resource group (managed by foundation/)"
+  value       = data.azurerm_resource_group.iam.name
 }
