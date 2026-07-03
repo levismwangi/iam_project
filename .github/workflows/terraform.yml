@@ -78,7 +78,11 @@ jobs:
 
       - run: tflint --init
 
-      - run: tflint --format compact --recursive
+      # --recursive lints each directory independently and only picks up a
+      # .tflint.hcl that lives in that exact directory — it does NOT inherit
+      # the root config for subdirectories (foundation/, modules/*) by default.
+      # Passing --config explicitly makes the root ruleset apply everywhere.
+      - run: tflint --format compact --recursive --config "$GITHUB_WORKSPACE/.tflint.hcl"
 
       - name: Checkov (block on HIGH/CRITICAL)
         uses: bridgecrewio/checkov-action@v12

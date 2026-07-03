@@ -9,6 +9,16 @@ name: Bootstrap Foundation
 #     and grants the Terraform SP the roles it needs to deploy
 #     the monitoring module (RBAC Admin + Sentinel Contributor)
 #
+# Prerequisite: the Terraform SP must already hold a
+# condition-constrained "Role Based Access Control Administrator"
+# assignment on the subscription (granted once by a human with
+# Owner/User Access Administrator rights — bootstrap.sh does this
+# automatically). The condition restricts the SP to assigning only
+# the two roles below, so it can never self-escalate to Owner.
+# Without it, this pipeline fails with 403 AuthorizationFailed on
+# Microsoft.Authorization/roleAssignments/write. See README →
+# Known Issues → "AuthorizationFailed on azurerm_role_assignment".
+#
 # When to run:
 #   - First time setting up a new environment
 #   - After terraform destroy wipes the IAM resource group
@@ -96,7 +106,6 @@ jobs:
           echo "ARM_ACCESS_KEY=${{ secrets.TF_STATE_ACCESS_KEY_DEV }}" >> $GITHUB_ENV
           echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
           echo "TF_VAR_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
-          echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_DEV }}" >> $GITHUB_ENV
 
       - name: Resolve SP Object ID (PROD)
         if: ${{ github.event.inputs.environment == 'prod' }}
@@ -109,7 +118,6 @@ jobs:
           echo "ARM_ACCESS_KEY=${{ secrets.TF_STATE_ACCESS_KEY_PROD }}" >> $GITHUB_ENV
           echo "ARM_USE_OIDC=true" >> $GITHUB_ENV
           echo "TF_VAR_subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
-          echo "TF_VAR_tenant_id=${{ secrets.AZURE_TENANT_ID_PROD }}" >> $GITHUB_ENV
 
       # ── Set non-sensitive variables ──────────────────────────────────────────
       - name: Set common variables

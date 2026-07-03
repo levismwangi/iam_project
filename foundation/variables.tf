@@ -5,11 +5,6 @@ variable "subscription_id" {
   type        = string
 }
 
-variable "tenant_id" {
-  description = "Azure AD Tenant ID"
-  type        = string
-}
-
 variable "company_name" {
   description = "Company name used in resource naming"
   type        = string
