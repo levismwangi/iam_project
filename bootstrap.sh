@@ -5,15 +5,18 @@
 # What this does:
 #   1. Collects required values interactively
 #   2. Creates a Service Principal with the required Graph API permissions
-#   3. Grants admin consent on all Graph permissions
-#   4. Assigns Security Administrator role to the SP
-#   5. Configures OIDC federated credentials (main, dev env, PR)
-#   6. Creates remote state storage (resource group, storage account, container)
-#   7. Creates Key Vault + grants you Secrets Officer access
-#   8. Grants SP Key Vault Secrets User access
-#   9. Prompts for temp password and stores it in Key Vault
-#  10. Generates terraform.tfvars
-#  11. Prints all GitHub secrets you need to configure
+#   3. Grants the SP a condition-constrained role-assignment right so it
+#      can bootstrap its own RBAC (see foundation/main.tf) without ever
+#      being able to self-escalate to Owner
+#   4. Grants admin consent on all Graph permissions
+#   5. Assigns Security Administrator role to the SP
+#   6. Configures OIDC federated credentials (main, dev env, PR)
+#   7. Creates remote state storage (resource group, storage account, container)
+#   8. Creates Key Vault + grants you Secrets Officer access
+#   9. Grants SP Key Vault Secrets User access
+#  10. Prompts for temp password and stores it in Key Vault
+#  11. Generates terraform.tfvars
+#  12. Prints all GitHub secrets you need to configure
 #
 # Prerequisites:
 #   - Azure CLI installed and logged in (az login)
@@ -95,7 +98,55 @@ APP_OBJECT_ID=$(az ad app show --id "$APP_CLIENT_ID" --query id -o tsv)
 
 success "Service Principal created — Client ID: $APP_CLIENT_ID"
 
-# ── Step 2: Grant Graph API permissions ───────────────────────────────────────
+# ── Step 2: Grant the SP a condition-constrained role-assignment right ────────
+# The foundation/ module (run later by the SP itself, via CI) needs to create
+# exactly two role assignments on the IAM resource group it creates. Contributor
+# alone can't do that — Microsoft.Authorization/roleAssignments/write is
+# deliberately excluded from Contributor to stop self-privilege-escalation.
+#
+# Simply granting "User Access Administrator" (or any role whose only
+# restriction is an action list) would NOT actually be narrow: holding
+# roleAssignments/write over a scope is equivalent to full control of that
+# scope, since it lets the holder grant itself Owner and go from there. An
+# action-list alone can't prevent that.
+#
+# Instead we use Azure's built-in "Role Based Access Control Administrator"
+# role — which already blocks assigning Owner/User Access Administrator/itself
+# — combined with an ABAC condition that further restricts it to ONLY the two
+# specific role definitions foundation/main.tf actually assigns. This is the
+# same condition pattern foundation/main.tf itself uses for the Sentinel
+# Responder assignment. Even though the scope below is the subscription (the
+# IAM resource group doesn't exist yet on a fresh setup), the SP can never
+# assign any role other than these two, to anything other than a service
+# principal or managed identity — so it cannot escalate itself to Owner.
+step "Granting SP a condition-constrained role-assignment right"
+
+info "  Resolving built-in role definition IDs..."
+RBAC_ADMIN_ROLE_ID=$(az role definition list --name "Role Based Access Control Administrator" --query "[0].name" -o tsv)
+SENTINEL_CONTRIB_ROLE_ID=$(az role definition list --name "Microsoft Sentinel Contributor" --query "[0].name" -o tsv)
+
+[[ -n "$RBAC_ADMIN_ROLE_ID" ]] || error "Could not resolve 'Role Based Access Control Administrator' role ID"
+[[ -n "$SENTINEL_CONTRIB_ROLE_ID" ]] || error "Could not resolve 'Microsoft Sentinel Contributor' role ID"
+
+BOOTSTRAP_CONDITION="((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${RBAC_ADMIN_ROLE_ID}, ${SENTINEL_CONTRIB_ROLE_ID}} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {'ServicePrincipal', 'ManagedIdentity'})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${RBAC_ADMIN_ROLE_ID}, ${SENTINEL_CONTRIB_ROLE_ID}} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {'ServicePrincipal', 'ManagedIdentity'}))"
+
+info "  Assigning constrained RBAC Administrator role to SP (may take a few seconds to propagate)..."
+for i in {1..5}; do
+  if az role assignment create \
+    --role "Role Based Access Control Administrator" \
+    --assignee "$APP_CLIENT_ID" \
+    --scope "/subscriptions/$SUBSCRIPTION_ID" \
+    --condition "$BOOTSTRAP_CONDITION" \
+    --condition-version "2.0" \
+    --output none 2>/dev/null; then
+    break
+  fi
+  sleep 10
+done
+
+success "SP granted condition-constrained role-assignment rights"
+
+# ── Step 3: Grant Graph API permissions ───────────────────────────────────────
 step "Granting Microsoft Graph API permissions"
 
 GRAPH_APP_ID="00000003-0000-0000-c000-000000000000"
@@ -122,7 +173,7 @@ done
 
 success "Graph API permissions added"
 
-# ── Step 3: Admin consent ─────────────────────────────────────────────────────
+# ── Step 4: Admin consent ─────────────────────────────────────────────────────
 step "Granting admin consent on Graph permissions"
 info "Waiting 15 seconds for permissions to register before consenting..."
 sleep 15
@@ -130,7 +181,7 @@ sleep 15
 az ad app permission admin-consent --id "$APP_CLIENT_ID" --output none
 success "Admin consent granted"
 
-# ── Step 4: Assign Security Administrator role ────────────────────────────────
+# ── Step 5: Assign Security Administrator role ────────────────────────────────
 step "Assigning Security Administrator role to SP"
 
 SEC_ADMIN_ROLE_ID=$(az rest \
@@ -164,7 +215,7 @@ az rest \
 
 success "Security Administrator role assigned"
 
-# ── Step 5: OIDC Federated credentials ───────────────────────────────────────
+# ── Step 6: OIDC Federated credentials ───────────────────────────────────────
 step "Configuring OIDC federated credentials"
 
 create_federated_credential() {
@@ -196,7 +247,7 @@ create_federated_credential \
 
 success "OIDC federated credentials configured"
 
-# ── Step 6: Remote state storage ──────────────────────────────────────────────
+# ── Step 7: Remote state storage ──────────────────────────────────────────────
 step "Creating Terraform remote state storage"
 
 info "  Creating resource group: $RG_NAME"
@@ -227,7 +278,7 @@ STATE_ACCESS_KEY=$(az storage account keys list \
 
 success "Remote state storage ready"
 
-# ── Step 7: Key Vault ─────────────────────────────────────────────────────────
+# ── Step 8: Key Vault ─────────────────────────────────────────────────────────
 step "Creating Key Vault: $KV_NAME"
 
 az keyvault create \
@@ -239,7 +290,7 @@ az keyvault create \
 
 success "Key Vault created"
 
-# ── Step 8: Grant yourself Secrets Officer access ─────────────────────────────
+# ── Step 9: Grant yourself Secrets Officer access ─────────────────────────────
 step "Granting your account Key Vault Secrets Officer access"
 
 MY_OBJECT_ID=$(az ad signed-in-user show --query id -o tsv)
@@ -254,7 +305,7 @@ info "Waiting 30 seconds for role assignment to propagate..."
 sleep 30
 success "Secrets Officer access granted"
 
-# ── Step 9: Grant SP Key Vault Secrets User access ────────────────────────────
+# ── Step 10: Grant SP Key Vault Secrets User access ────────────────────────────
 step "Granting SP Key Vault Secrets User access"
 
 az role assignment create \
@@ -265,7 +316,7 @@ az role assignment create \
 
 success "SP Key Vault access granted"
 
-# ── Step 10: Store temp password in Key Vault ─────────────────────────────────
+# ── Step 11: Store temp password in Key Vault ─────────────────────────────────
 step "Storing temporary user password in Key Vault"
 echo ""
 warn "Password must be 8+ characters with uppercase, lowercase, number, and special character."
@@ -293,7 +344,7 @@ az keyvault secret set \
 unset TEMP_PASSWORD TEMP_PASSWORD_CONFIRM
 success "Password stored in Key Vault"
 
-# ── Step 11: Generate terraform.tfvars ────────────────────────────────────────
+# ── Step 12: Generate terraform.tfvars ────────────────────────────────────────
 step "Generating terraform.tfvars"
 
 cat > terraform.tfvars <<EOF
@@ -311,7 +362,7 @@ EOF
 
 success "terraform.tfvars written"
 
-# ── Step 12: Update providers.tf backend ──────────────────────────────────────
+# ── Step 13: Update providers.tf backend ──────────────────────────────────────
 step "Updating providers.tf with your storage account name"
 
 sed -i "s/storage_account_name = \"tfstateiam\"/storage_account_name = \"$STORAGE_ACCOUNT\"/" providers.tf
