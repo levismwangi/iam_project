@@ -100,7 +100,7 @@ resource "azurerm_monitor_aad_diagnostic_setting" "this" {
 
 resource "time_sleep" "wait_for_sentinel_permissions" {
   depends_on      = [azurerm_sentinel_log_analytics_workspace_onboarding.this]
-  create_duration = "60s"
+  create_duration = "90s"
 }
 
 # ============================================================
@@ -152,7 +152,7 @@ resource "azurerm_logic_app_workflow" "disable_user" {
 # and fails with a misleading 403.
 resource "time_sleep" "wait_for_logic_app_identity" {
   depends_on      = [azurerm_logic_app_workflow.disable_user]
-  create_duration = "30s"
+  create_duration = "60s"
 }
 
 # Give the Logic App permission to act as a Sentinel Responder
