@@ -88,6 +88,22 @@ resource "azurerm_monitor_aad_diagnostic_setting" "this" {
 }
 
 # ============================================================
+# PROPAGATION WAIT
+# Azure RBAC role assignments (Sentinel Contributor) are assigned
+# at the resource group level by the foundation module. They
+# propagate to child resources (this workspace) asynchronously.
+# Without this wait, Terraform creates the workspace and immediately
+# tries to create Sentinel rules against it before the SP's
+# Sentinel Contributor role has propagated down — causing 401s.
+# 60 seconds is enough for propagation in practice.
+# ============================================================
+
+resource "time_sleep" "wait_for_sentinel_permissions" {
+  depends_on      = [azurerm_sentinel_log_analytics_workspace_onboarding.this]
+  create_duration = "60s"
+}
+
+# ============================================================
 # ACTION GROUP — where alerts get sent
 # ============================================================
 
@@ -130,12 +146,15 @@ resource "azurerm_logic_app_workflow" "disable_user" {
   }
 }
 
-# Give the Logic app permission to act as a Sentinel Responder
-# (needed to update incidents and trigger responses)
+# Wait for the Logic App's system-assigned managed identity to fully
+# propagate in Entra ID before attempting to assign a role to it.
+# Without this, the role assignment call races the identity creation
+# and fails with a misleading 403.
 resource "time_sleep" "wait_for_logic_app_identity" {
   depends_on      = [azurerm_logic_app_workflow.disable_user]
   create_duration = "30s"
 }
+
 # Give the Logic App permission to act as a Sentinel Responder
 # (needed to update incidents and trigger responses)
 resource "azurerm_role_assignment" "logic_app_sentinel_responder" {
@@ -149,6 +168,10 @@ resource "azurerm_role_assignment" "logic_app_sentinel_responder" {
 # PHASE 1 & 2 — SENTINEL ANALYTICS RULES
 # Migrated from scheduled query rules to proper Sentinel rules
 # with incident creation, entity mapping, and MITRE tagging
+#
+# All rules depend on time_sleep.wait_for_sentinel_permissions
+# to ensure the SP's Sentinel Contributor role has propagated
+# to the workspace scope before Terraform attempts to create rules.
 # ============================================================
 
 # SENTINEL RULE 1 — New Admin Role Assignment
@@ -166,7 +189,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "new_admin_role" {
   trigger_threshold          = 0
   tactics                    = ["PrivilegeEscalation", "Persistence"]
   techniques                 = ["T1078"]
-  depends_on                 = [azurerm_sentinel_log_analytics_workspace_onboarding.this]
+  depends_on                 = [time_sleep.wait_for_sentinel_permissions]
 
   query = <<-KQL
     AuditLogs
@@ -177,8 +200,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "new_admin_role" {
     | extend RoleName    = tostring(TargetResources[1].displayName)
     | project TimeGenerated, InitiatedBy, TargetUser, RoleName, OperationName
   KQL
-
-
 
   entity_mapping {
     entity_type = "Account"
@@ -212,7 +233,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "bulk_user_deletion" {
   trigger_threshold          = 0
   tactics                    = ["Impact"]
   techniques                 = ["T1531"]
-  depends_on                 = [azurerm_sentinel_log_analytics_workspace_onboarding.this]
+  depends_on                 = [time_sleep.wait_for_sentinel_permissions]
 
   query = <<-KQL
     AuditLogs
@@ -223,8 +244,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "bulk_user_deletion" {
     | summarize DeletionCount = count(), DeletedUsers = make_list(DeletedUser) by InitiatedBy, bin(TimeGenerated, 5m)
     | where DeletionCount >= 3
   KQL
-
-
 
   entity_mapping {
     entity_type = "Account"
@@ -250,7 +269,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "ca_policy_change" {
   trigger_threshold          = 0
   tactics                    = ["DefenseEvasion", "Persistence"]
   techniques                 = ["T1556"]
-  depends_on                 = [azurerm_sentinel_log_analytics_workspace_onboarding.this]
+  depends_on                 = [time_sleep.wait_for_sentinel_permissions]
 
   query = <<-KQL
     AuditLogs
@@ -266,8 +285,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "ca_policy_change" {
     | project TimeGenerated, InitiatedBy, PolicyName, ChangeType
   KQL
 
-
-
   entity_mapping {
     entity_type = "Account"
     field_mapping {
@@ -280,6 +297,9 @@ resource "azurerm_sentinel_alert_rule_scheduled" "ca_policy_change" {
 /*
 # SENTINEL RULE 4 — Sign-in from Outside Trusted Locations
 # MITRE: Initial Access — T1078 (Valid Accounts)
+# Commented out — SignInLogs table doesn't exist until sign-in data
+# starts flowing. Uncomment after: sign out/in to portal, wait 10-15 min,
+# verify with: SignInLogs | take 5 in Log Analytics, then re-apply.
 resource "azurerm_sentinel_alert_rule_scheduled" "signin_outside_trusted" {
   name                       = "sentinel-${var.resource_prefix}-signin-untrusted-location"
   log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
@@ -293,7 +313,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "signin_outside_trusted" {
   trigger_threshold          = 0
   tactics                    = ["InitialAccess"]
   techniques                 = ["T1078"]
-  depends_on                 = [azurerm_monitor_aad_diagnostic_setting.this, azurerm_sentinel_log_analytics_workspace_onboarding.this]
+  depends_on                 = [time_sleep.wait_for_sentinel_permissions, azurerm_monitor_aad_diagnostic_setting.this]
 
   query = <<-KQL
     SignInLogs
@@ -304,8 +324,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "signin_outside_trusted" {
     | extend Country = tostring(LocationDetails.countryOrRegion)
     | project TimeGenerated, UserPrincipalName, City, Country, IPAddress, RiskLevelDuringSignIn
   KQL
-
-
 
   entity_mapping {
     entity_type = "Account"
@@ -323,7 +341,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "signin_outside_trusted" {
     }
   }
 }
-
 */
 
 # SENTINEL RULE 5 — New MFA Registration
@@ -341,7 +358,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "mfa_registration" {
   trigger_threshold          = 0
   tactics                    = ["Persistence"]
   techniques                 = ["T1098"]
-  depends_on                 = [azurerm_sentinel_log_analytics_workspace_onboarding.this]
+  depends_on                 = [time_sleep.wait_for_sentinel_permissions]
 
   query = <<-KQL
     AuditLogs
@@ -351,8 +368,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "mfa_registration" {
     | extend AuthMethod  = tostring(TargetResources[0].displayName)
     | project TimeGenerated, InitiatedBy, AuthMethod
   KQL
-
-
 
   entity_mapping {
     entity_type = "Account"
@@ -378,7 +393,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "pim_outside_hours" {
   trigger_threshold          = 0
   tactics                    = ["PrivilegeEscalation"]
   techniques                 = ["T1078"]
-  depends_on                 = [azurerm_sentinel_log_analytics_workspace_onboarding.this]
+  depends_on                 = [time_sleep.wait_for_sentinel_permissions]
 
   query = <<-KQL
     AuditLogs
@@ -391,8 +406,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "pim_outside_hours" {
     | project TimeGenerated, InitiatedBy, RoleName, Hour
   KQL
 
-
-
   entity_mapping {
     entity_type = "Account"
     field_mapping {
@@ -403,10 +416,11 @@ resource "azurerm_sentinel_alert_rule_scheduled" "pim_outside_hours" {
 }
 
 /*
-# SENTINEL RULE 7 — Impossible Travel (Phase 1 — uncommented)
+# SENTINEL RULE 7 — Impossible Travel
 # MITRE: Initial Access — T1078 (Valid Accounts)
-# Detects: Same user signing in from two geographically distant locations
-# within a short time window
+# Commented out — SignInLogs table doesn't exist until sign-in data
+# starts flowing. Uncomment after: sign out/in to portal, wait 10-15 min,
+# verify with: SignInLogs | take 5 in Log Analytics, then re-apply.
 resource "azurerm_sentinel_alert_rule_scheduled" "impossible_travel" {
   name                       = "sentinel-${var.resource_prefix}-impossible-travel"
   log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
@@ -420,7 +434,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "impossible_travel" {
   trigger_threshold          = 0
   tactics                    = ["InitialAccess"]
   techniques                 = ["T1078"]
-  depends_on                 = [azurerm_monitor_aad_diagnostic_setting.this, azurerm_sentinel_log_analytics_workspace_onboarding.this]
+  depends_on                 = [time_sleep.wait_for_sentinel_permissions, azurerm_monitor_aad_diagnostic_setting.this]
 
   query = <<-KQL
     let timeWindow = 60m;
@@ -449,7 +463,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "impossible_travel" {
     | project UserPrincipalName, DistanceKm, Location1 = L1, Location2 = L2, TimeGenerated
   KQL
 
-
   entity_mapping {
     entity_type = "Account"
     field_mapping {
@@ -458,7 +471,6 @@ resource "azurerm_sentinel_alert_rule_scheduled" "impossible_travel" {
     }
   }
 }
-
 */
 
 # ============================================================
@@ -478,6 +490,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "new_admin_role" {
   evaluation_frequency  = "PT5M"
   window_duration       = "PT5M"
   scopes                = [azurerm_log_analytics_workspace.this.id]
+  depends_on            = [time_sleep.wait_for_sentinel_permissions]
 
   criteria {
     query                   = <<-KQL
@@ -519,6 +532,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "bulk_user_deletion" {
   evaluation_frequency  = "PT5M"
   window_duration       = "PT5M"
   scopes                = [azurerm_log_analytics_workspace.this.id]
+  depends_on            = [time_sleep.wait_for_sentinel_permissions]
 
   criteria {
     query                   = <<-KQL
@@ -560,6 +574,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ca_policy_change" {
   evaluation_frequency  = "PT5M"
   window_duration       = "PT5M"
   scopes                = [azurerm_log_analytics_workspace.this.id]
+  depends_on            = [time_sleep.wait_for_sentinel_permissions]
 
   criteria {
     query                   = <<-KQL
@@ -605,7 +620,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "signin_outside_truste
   evaluation_frequency  = "PT15M"
   window_duration       = "PT15M"
   scopes                = [azurerm_log_analytics_workspace.this.id]
-  depends_on            = [azurerm_monitor_aad_diagnostic_setting.this]
+  depends_on            = [time_sleep.wait_for_sentinel_permissions, azurerm_monitor_aad_diagnostic_setting.this]
 
   criteria {
     query                   = <<-KQL
@@ -647,6 +662,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "mfa_registration" {
   evaluation_frequency  = "PT5M"
   window_duration       = "PT5M"
   scopes                = [azurerm_log_analytics_workspace.this.id]
+  depends_on            = [time_sleep.wait_for_sentinel_permissions]
 
   criteria {
     query                   = <<-KQL
@@ -687,6 +703,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "pim_outside_hours" {
   evaluation_frequency  = "PT5M"
   window_duration       = "PT5M"
   scopes                = [azurerm_log_analytics_workspace.this.id]
+  depends_on            = [time_sleep.wait_for_sentinel_permissions]
 
   criteria {
     query                   = <<-KQL
@@ -721,7 +738,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "pim_outside_hours" {
 # ============================================================
 # SENTINEL RULE 8 — Illicit Consent Grant (OAuth Token Theft)
 # MITRE: Credential Access / Persistence — T1528 (Steal Application
-# Access Token), T1550.001 (Use Alternate Authentication Material)
+# Access Token)
 #
 # THREAT MODEL
 # Unlike credential-based attacks, this technique never touches the
@@ -767,11 +784,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "illicit_consent_grant" {
   trigger_threshold          = 0
   tactics                    = ["CredentialAccess", "Persistence"]
   techniques                 = ["T1528"]
-  depends_on                 = [azurerm_sentinel_log_analytics_workspace_onboarding.this]
-
-  # skip_query_validation intentionally NOT set here — this query only
-  # references AuditLogs, which is already validated and flowing from
-  # the existing rules in this module.
+  depends_on                 = [time_sleep.wait_for_sentinel_permissions]
 
   query = <<-KQL
     let HighRiskScopes = dynamic([
