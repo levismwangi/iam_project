@@ -152,7 +152,7 @@ resource "azurerm_logic_app_workflow" "disable_user" {
 # and fails with a misleading 403.
 resource "time_sleep" "wait_for_logic_app_identity" {
   depends_on      = [azurerm_logic_app_workflow.disable_user]
-  create_duration = "90s"
+  create_duration = "120s"
 }
 
 # Give the Logic App permission to act as a Sentinel Responder
