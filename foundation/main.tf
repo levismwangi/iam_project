@@ -38,13 +38,16 @@ resource "azurerm_resource_group" "iam" {
 
 # ── Role Based Access Control Administrator (constrained) ─────────────────────
 # Allows the Terraform SP to assign Microsoft Sentinel Responder to the
-# Logic App's managed identity. Constrained so it cannot assign any other
-# role or assign to any other principal type.
+# Logic App's managed identity. Scoped at subscription level so the condition
+# evaluates correctly against child resources (e.g. Log Analytics workspace).
+# Scoping at resource group level caused condition evaluation failures when
+# Terraform tried to assign the role at the workspace child scope.
+# Constrained by condition so it can only assign Sentinel Responder to
+# ServicePrincipal/ManagedIdentity types — nothing else.
 resource "azurerm_role_assignment" "terraform_sp_rbac_admin" {
-  scope                = azurerm_resource_group.iam.id
+  scope                = "/subscriptions/${var.subscription_id}"
   role_definition_name = "Role Based Access Control Administrator"
   principal_id         = var.terraform_sp_object_id
-  principal_type       = "ServicePrincipal"
 
   condition_version = "2.0"
   condition         = <<-CONDITION
@@ -59,5 +62,4 @@ resource "azurerm_role_assignment" "terraform_sp_sentinel_contributor" {
   scope                = azurerm_resource_group.iam.id
   role_definition_name = "Microsoft Sentinel Contributor"
   principal_id         = var.terraform_sp_object_id
-  principal_type       = "ServicePrincipal"
 }
