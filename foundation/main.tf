@@ -7,10 +7,7 @@
 # can deploy, specifically:
 #
 #   1. The IAM resource group
-#   2. Role Based Access Control Administrator (constrained)
-#      — allows the Terraform SP to assign Sentinel Responder
-#        to the Logic App's managed identity
-#   3. Microsoft Sentinel Contributor
+#   2. Microsoft Sentinel Contributor
 #      — allows the Terraform SP to create Sentinel analytics rules
 #
 # Triggered by: .github/workflows/bootstrap.yml (manual only)
