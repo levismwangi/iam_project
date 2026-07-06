@@ -15,8 +15,8 @@
 # ============================================================
 
 locals {
-  resource_prefix       = "${var.company_name}-${var.environment}"
-  iam_rg_name           = "rg-${local.resource_prefix}-iam"
+  resource_prefix = "${var.company_name}-${var.environment}"
+  iam_rg_name     = "rg-${local.resource_prefix}-iam"
 }
 
 # ── IAM Resource Group ────────────────────────────────────────────────────────
