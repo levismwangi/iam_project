@@ -20,7 +20,6 @@
 locals {
   resource_prefix       = "${var.company_name}-${var.environment}"
   iam_rg_name           = "rg-${local.resource_prefix}-iam"
-  sentinel_responder_id = "3e150937-b8fe-4cfb-8069-0eaf05ecd056"
 }
 
 # ── IAM Resource Group ────────────────────────────────────────────────────────
@@ -36,24 +35,6 @@ resource "azurerm_resource_group" "iam" {
   }
 }
 
-# ── Role Based Access Control Administrator (constrained) ─────────────────────
-# Allows the Terraform SP to assign Microsoft Sentinel Responder to the
-# Logic App's managed identity. Scoped at subscription level so the condition
-# evaluates correctly against child resources (e.g. Log Analytics workspace).
-# Scoping at resource group level caused condition evaluation failures when
-# Terraform tried to assign the role at the workspace child scope.
-# Constrained by condition so it can only assign Sentinel Responder to
-# ServicePrincipal/ManagedIdentity types — nothing else.
-resource "azurerm_role_assignment" "terraform_sp_rbac_admin" {
-  scope                = "/subscriptions/${var.subscription_id}"
-  role_definition_name = "Role Based Access Control Administrator"
-  principal_id         = var.terraform_sp_object_id
-
-  condition_version = "2.0"
-  condition         = <<-CONDITION
-    ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${local.sentinel_responder_id}} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {'ServicePrincipal', 'ManagedIdentity'})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${local.sentinel_responder_id}} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {'ServicePrincipal', 'ManagedIdentity'}))
-  CONDITION
-}
 
 # ── Microsoft Sentinel Contributor ────────────────────────────────────────────
 # Allows the Terraform SP to create and manage Sentinel analytics rules,
