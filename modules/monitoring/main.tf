@@ -919,8 +919,8 @@ resource "azurerm_sentinel_alert_rule_scheduled" "prt_replay_detection" {
   query_period               = "PT1H"
   trigger_operator           = "GreaterThan"
   trigger_threshold          = 0
-  tactics                    = ["CredentialAccess", "DefenseEvasion", "Persistence"]
-  techniques                 = ["T1528", "T1550"]
+  tactics                    = ["CredentialAccess", "DefenseEvasion", "Persistence", "LateralMovement"]
+  techniques                 = ["T1528", "T1550.001"]
   depends_on = [
     time_sleep.wait_for_sentinel_permissions,
     azurerm_monitor_aad_diagnostic_setting.this,
@@ -944,6 +944,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "prt_replay_detection" {
     | extend MfaByClaim = AuthenticationDetails has "MFA requirement satisfied by claim in the token"
     | extend UserAppDeviceKey = strcat(UserPrincipalName, "|", AppId, "|", DeviceId)
     | join kind=leftanti KnownGood on UserAppDeviceKey
+    | extend UserAppDeviceKey = strcat(UserPrincipalName, "|", AppId, "|", DeviceId)  // re-extend after leftanti — join consumes the column from scope
     | extend IsHighRiskApp = AppId in (HighRiskApps)
     | join kind=leftouter Velocity on DeviceId
     | extend VelocityFlag = DistinctIPs > 1
