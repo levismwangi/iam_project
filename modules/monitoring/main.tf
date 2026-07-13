@@ -913,14 +913,14 @@ resource "azurerm_sentinel_alert_rule_scheduled" "prt_replay_detection" {
     with Primary Refresh Token (PRT) theft and replay — investigate the
     device and session context before assuming legitimacy.
   DESC
-  severity           = "High"
-  enabled            = true
-  query_frequency    = "PT15M"
-  query_period       = "PT1H"
-  trigger_operator   = "GreaterThan"
-  trigger_threshold  = 0
-  tactics            = ["CredentialAccess", "DefenseEvasion", "Persistence"]
-  techniques         = ["T1528", "T1550"]
+  severity                   = "High"
+  enabled                    = true
+  query_frequency            = "PT15M"
+  query_period               = "PT1H"
+  trigger_operator           = "GreaterThan"
+  trigger_threshold          = 0
+  tactics                    = ["CredentialAccess", "DefenseEvasion", "Persistence"]
+  techniques                 = ["T1528", "T1550"]
   depends_on = [
     time_sleep.wait_for_sentinel_permissions,
     azurerm_monitor_aad_diagnostic_setting.this,
