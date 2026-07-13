@@ -1,0 +1,83 @@
+name: PRT Watchlist Refresh
+
+# ============================================================
+# Rebuilds the KnownUserAppDevice Sentinel watchlist that backs the
+# PRT replay detection rule (modules/monitoring/main.tf).
+#
+# Deliberately kept OUTSIDE the main Terraform pipeline — this job
+# mutates watchlist *items*, not Terraform-managed resource state.
+# Terraform owns the watchlist container (with raw_content excluded
+# from drift detection via lifecycle.ignore_changes); this workflow
+# owns the rolling contents.
+#
+# Runs daily. Also dispatchable manually for testing after first
+# deploying the monitoring module.
+# ============================================================
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
+
+concurrency:
+  group: watchlist-refresh-${{ github.event.inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: "Refresh PRT Watchlist Baseline"
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (DEV)
+        if: ${{ (github.event.inputs.environment || 'dev') != 'prod' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_DEV }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID_DEV }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}
+
+      - name: Azure Login (PROD)
+        if: ${{ github.event.inputs.environment == 'prod' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID_PROD }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID_PROD }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}
+
+      - name: Set target env vars (DEV)
+        if: ${{ (github.event.inputs.environment || 'dev') != 'prod' }}
+        run: |
+          echo "SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}" >> $GITHUB_ENV
+          echo "RESOURCE_GROUP=rg-${{ vars.COMPANY_NAME }}-dev-iam" >> $GITHUB_ENV
+          echo "WORKSPACE_NAME=law-${{ vars.COMPANY_NAME }}-dev-iam-2" >> $GITHUB_ENV
+
+      - name: Set target env vars (PROD)
+        if: ${{ github.event.inputs.environment == 'prod' }}
+        run: |
+          echo "SUBSCRIPTION_ID=${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}" >> $GITHUB_ENV
+          echo "RESOURCE_GROUP=rg-${{ vars.COMPANY_NAME }}-prod-iam" >> $GITHUB_ENV
+          echo "WORKSPACE_NAME=law-${{ vars.COMPANY_NAME }}-prod-iam-2" >> $GITHUB_ENV
+
+      - name: Refresh watchlist
+        run: python3 scripts/refresh_prt_watchlist.py
+        env:
+          WATCHLIST_ALIAS: KnownUserAppDevice
+          BASELINE_MIN_COUNT: "5"
+          BASELINE_WINDOW_DAYS: "30"

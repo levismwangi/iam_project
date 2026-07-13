@@ -38,6 +38,16 @@ output "log_analytics_workspace_id" {
   value       = module.monitoring.log_analytics_workspace_id
 }
 
+output "sentinel_rule_ids" {
+  description = "Map of Sentinel-native analytics rule names to resource IDs"
+  value       = module.monitoring.sentinel_rule_ids
+}
+
+output "prt_watchlist_name" {
+  description = "Name of the Sentinel watchlist backing PRT replay detection"
+  value       = module.monitoring.prt_watchlist_name
+}
+
 output "resource_group_name" {
   description = "Name of the IAM resource group (managed by foundation/)"
   value       = data.azurerm_resource_group.iam.name

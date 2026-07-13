@@ -15,7 +15,7 @@ output "action_group_id" {
 
 
 output "alert_rule_ids" {
-  description = "Map of alert rule names to resource IDs"
+  description = "Map of legacy scheduled-query alert rule names to resource IDs (email-alerting layer)"
   value = {
     new_admin_role_assignment = azurerm_monitor_scheduled_query_rules_alert_v2.new_admin_role.id
     bulk_user_deletion        = azurerm_monitor_scheduled_query_rules_alert_v2.bulk_user_deletion.id
@@ -26,6 +26,23 @@ output "alert_rule_ids" {
   }
 }
 
+output "sentinel_rule_ids" {
+  description = "Map of Sentinel-native analytics rule names to resource IDs (incident-creating layer)"
+  value = {
+    new_admin_role_assignment = azurerm_sentinel_alert_rule_scheduled.new_admin_role.id
+    bulk_user_deletion        = azurerm_sentinel_alert_rule_scheduled.bulk_user_deletion.id
+    ca_policy_change          = azurerm_sentinel_alert_rule_scheduled.ca_policy_change.id
+    mfa_registration          = azurerm_sentinel_alert_rule_scheduled.mfa_registration.id
+    pim_outside_hours         = azurerm_sentinel_alert_rule_scheduled.pim_outside_hours.id
+    illicit_consent_grant     = azurerm_sentinel_alert_rule_scheduled.illicit_consent_grant.id
+    prt_replay_detection      = azurerm_sentinel_alert_rule_scheduled.prt_replay_detection.id
+  }
+}
+
+output "prt_watchlist_name" {
+  description = "Name of the Sentinel watchlist backing PRT replay detection — used by watchlist-refresh.yml to target the correct watchlist alias"
+  value       = azurerm_sentinel_watchlist.known_user_app_device.name
+}
 
 output "sentinel_workspace_id" {
   description = "Sentinel onboarding workspace ID"

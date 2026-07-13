@@ -827,6 +827,162 @@ resource "azurerm_sentinel_alert_rule_scheduled" "illicit_consent_grant" {
 }
 
 # ============================================================
+# SENTINEL WATCHLIST — PRT Replay Baseline
+# Backs the composite-score PRT detection rule below.
+#
+# Populated/refreshed OUTSIDE Terraform by a scheduled GitHub Actions
+# workflow (.github/workflows/watchlist-refresh.yml), which queries
+# 30 days of sign-in history and upserts known-good
+# UserPrincipalName + AppId + DeviceId combinations via the Sentinel
+# Watchlist Items REST API.
+#
+# Terraform only owns the empty container — azurerm_sentinel_watchlist
+# has no argument for seeding/managing item content (the underlying
+# Watchlist API's rawContent field is append-only on PUT, so the
+# provider deliberately left it out to avoid duplicate items piling up
+# on repeated applies; see hashicorp/terraform-provider-azurerm#14258).
+# Item-level management exists as a separate resource,
+# azurerm_sentinel_watchlist_item, but at one resource per item that
+# doesn't fit a rolling daily-refreshed baseline — hence the REST API
+# approach in the script instead.
+# ============================================================
+
+resource "azurerm_sentinel_watchlist" "known_user_app_device" {
+  name                       = "KnownUserAppDevice"
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
+  display_name               = "Known User-App-Device Combinations (PRT Baseline)"
+  description                = "Rolling baseline of UserPrincipalName+AppId+DeviceId combinations seen in the last 30 days of sign-in history. Used by the PRT replay detection rule to flag first-seen combinations on non-interactive sign-ins. Created empty — azurerm_sentinel_watchlist has no argument for seeding/managing item content beyond the required item_search_key (the underlying API's rawContent field is append-only on PUT, so the provider deliberately omits it — see hashicorp/terraform-provider-azurerm#14258 — to avoid duplicate items piling up on repeated applies). All items are populated/refreshed out-of-band by watchlist-refresh.yml via the Watchlist Items REST API — do not attempt to manage items through this resource."
+  item_search_key            = "UserAppDeviceKey"
+
+  depends_on = [time_sleep.wait_for_sentinel_permissions]
+}
+
+# ============================================================
+# SENTINEL RULE 9 — PRT Theft / Pass-the-PRT (Composite Score)
+# MITRE: Credential Access — T1528 (Steal Application Access Token)
+#         Defense Evasion / Persistence — T1550 (Use Alternate
+#         Authentication Material)
+#
+# THREAT MODEL
+# A Primary Refresh Token (PRT), together with its session key, is
+# the artifact Entra-joined devices use to mint fresh access tokens
+# without re-prompting the user — including inheriting an "MFA
+# satisfied" claim. If an attacker extracts a PRT + session key from
+# a compromised device (LSASS memory access) or abuses the WAM/
+# TokenBroker in-session broker with a spoofed first-party client ID,
+# they can mint valid, MFA-claiming tokens from an attacker-controlled
+# context without a fresh interactive sign-in or MFA challenge. The
+# resulting sign-in event is structurally identical to a legitimate
+# one — this is not a credential-guessing attack, so failed-logon or
+# password-spray style detections see nothing.
+#
+# DETECTION LOGIC
+# No single field reliably distinguishes a replayed token from a
+# legitimate one, so this rule scores four independent signals and
+# only fires on the combination (threshold configurable via
+# var.prt_composite_score_threshold, default 5):
+#   +2  Non-interactive sign-in for a UserPrincipalName+AppId+DeviceId
+#       combination never seen in the 30-day baseline watchlist
+#   +2  Client ID belongs to a well-known first-party app (Azure CLI,
+#       Azure PowerShell) commonly targeted by broker-abuse tooling
+#       for silent token issuance
+#   +2  Sign-in carries "MFA requirement satisfied by claim in the
+#       token" — MFA was inherited from the PRT, not performed in
+#       this session
+#   +3  Same device ID observed from more than one distinct IP within
+#       the 1-hour query window (velocity/context mismatch)
+#
+# SCOPING NOTE
+# A fifth signal — device compliance-state mismatch via Intune — is
+# intentionally NOT included. This project does not provision Intune,
+# so no compliance telemetry exists to join against. Adding it would
+# require Intune enrollment data outside this project's current
+# scope; documented here rather than silently omitted.
+# ============================================================
+
+resource "azurerm_sentinel_alert_rule_scheduled" "prt_replay_detection" {
+  name                       = "sentinel-${var.resource_prefix}-prt-replay-detection"
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
+  display_name               = "Possible PRT Theft — Composite Risk Score"
+  description                = <<-DESC
+    Fires when a non-interactive sign-in accumulates a composite risk
+    score >= ${var.prt_composite_score_threshold} across: an unbaselined
+    user/app/device combination, a high-risk first-party client ID, an
+    MFA-by-claim token (no fresh MFA challenge performed), and/or
+    same-device sign-ins from multiple IPs within the hour. Consistent
+    with Primary Refresh Token (PRT) theft and replay — investigate the
+    device and session context before assuming legitimacy.
+  DESC
+  severity           = "High"
+  enabled            = true
+  query_frequency    = "PT15M"
+  query_period       = "PT1H"
+  trigger_operator   = "GreaterThan"
+  trigger_threshold  = 0
+  tactics            = ["CredentialAccess", "DefenseEvasion", "Persistence"]
+  techniques         = ["T1528", "T1550"]
+  depends_on = [
+    time_sleep.wait_for_sentinel_permissions,
+    azurerm_monitor_aad_diagnostic_setting.this,
+    azurerm_sentinel_watchlist.known_user_app_device,
+  ]
+
+  query = <<-KQL
+    let KnownGood = _GetWatchlist('KnownUserAppDevice') | project UserAppDeviceKey;
+    let HighRiskApps = dynamic(${jsonencode(var.prt_high_risk_client_ids)});
+    let Velocity =
+      SigninLogs
+      | where TimeGenerated > ago(1h)
+      | where ResultType == 0
+      | extend DeviceId = tostring(DeviceDetail.deviceId)
+      | where isnotempty(DeviceId)
+      | summarize DistinctIPs = dcount(IPAddress) by DeviceId;
+    union isfuzzy=true SigninLogs, NonInteractiveUserSignInLogs
+    | where TimeGenerated > ago(1h)
+    | where ResultType == 0
+    | extend DeviceId  = tostring(DeviceDetail.deviceId)
+    | extend MfaByClaim = AuthenticationDetails has "MFA requirement satisfied by claim in the token"
+    | extend UserAppDeviceKey = strcat(UserPrincipalName, "|", AppId, "|", DeviceId)
+    | join kind=leftanti KnownGood on UserAppDeviceKey
+    | extend IsHighRiskApp = AppId in (HighRiskApps)
+    | join kind=leftouter Velocity on DeviceId
+    | extend VelocityFlag = DistinctIPs > 1
+    | extend Score =
+        2                                    // unbaselined combo (leftanti join = always true here)
+        + (iff(IsHighRiskApp, 2, 0))
+        + (iff(MfaByClaim, 2, 0))
+        + (iff(VelocityFlag, 3, 0))
+    | where Score >= ${var.prt_composite_score_threshold}
+    | project TimeGenerated, UserPrincipalName, AppId, AppDisplayName, DeviceId, IPAddress,
+              MfaByClaim, IsHighRiskApp, VelocityFlag, Score, CorrelationId
+  KQL
+
+  entity_mapping {
+    entity_type = "Account"
+    field_mapping {
+      identifier  = "FullName"
+      column_name = "UserPrincipalName"
+    }
+  }
+
+  entity_mapping {
+    entity_type = "Host"
+    field_mapping {
+      identifier  = "FullName"
+      column_name = "DeviceId"
+    }
+  }
+
+  entity_mapping {
+    entity_type = "IP"
+    field_mapping {
+      identifier  = "Address"
+      column_name = "IPAddress"
+    }
+  }
+}
+
+# ============================================================
 # PROVIDER REQUIREMENTS
 # ============================================================
 
