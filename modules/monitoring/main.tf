@@ -920,7 +920,7 @@ resource "azurerm_sentinel_alert_rule_scheduled" "prt_replay_detection" {
   trigger_operator           = "GreaterThan"
   trigger_threshold          = 0
   tactics                    = ["CredentialAccess", "DefenseEvasion", "Persistence", "LateralMovement"]
-  techniques                 = ["T1528", "T1550.001"]
+  techniques                 = ["T1528", "T1550"]
   depends_on = [
     time_sleep.wait_for_sentinel_permissions,
     azurerm_monitor_aad_diagnostic_setting.this,
