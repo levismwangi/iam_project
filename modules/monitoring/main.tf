@@ -928,7 +928,8 @@ resource "azurerm_sentinel_alert_rule_scheduled" "prt_replay_detection" {
   ]
 
   query = <<-KQL
-    let KnownGood = _GetWatchlist('KnownUserAppDevice') | project UserAppDeviceKey;
+    let WatchlistItemCount = toscalar(_GetWatchlist('KnownUserAppDevice') | count);
+    let KnownGood = _GetWatchlist('KnownUserAppDevice') | project UserAppDeviceKey = column_ifexists('UserAppDeviceKey', '');
     let HighRiskApps = dynamic(${jsonencode(var.prt_high_risk_client_ids)});
     let Velocity =
       SigninLogs
@@ -948,11 +949,16 @@ resource "azurerm_sentinel_alert_rule_scheduled" "prt_replay_detection" {
     | join kind=leftouter Velocity on DeviceId
     | extend VelocityFlag = DistinctIPs > 1
     | extend Score =
-        2                                    // unbaselined combo (leftanti join = always true here)
+        2                                    // unbaselined combo (leftanti join = always true here, but see
+                                             // WatchlistItemCount gate below — before the watchlist has been
+                                             // populated at least once, every row would score this unconditional
+                                             // +2, so results are suppressed entirely rather than treating a
+                                             // cold-start/empty baseline as a signal)
         + (iff(IsHighRiskApp, 2, 0))
         + (iff(MfaByClaim, 2, 0))
         + (iff(VelocityFlag, 3, 0))
     | where Score >= ${var.prt_composite_score_threshold}
+    | where WatchlistItemCount > 0   // suppress all findings until the baseline watchlist has been populated at least once
     | project TimeGenerated, UserPrincipalName, AppId, AppDisplayName, DeviceId, IPAddress,
               MfaByClaim, IsHighRiskApp, VelocityFlag, Score, CorrelationId
   KQL
