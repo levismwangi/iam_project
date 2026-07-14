@@ -100,7 +100,7 @@ resource "azurerm_monitor_aad_diagnostic_setting" "this" {
 
 resource "time_sleep" "wait_for_sentinel_permissions" {
   depends_on      = [azurerm_sentinel_log_analytics_workspace_onboarding.this]
-  create_duration = "90s"
+  create_duration = "300s"
 }
 
 # ============================================================
