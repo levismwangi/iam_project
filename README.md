@@ -2,7 +2,7 @@
 
 A project exploring **Microsoft Entra ID identity telemetry and threat detection**, provisioned via **Terraform IaC** with a **GitHub Actions CI/CD pipeline**.
 
-> **Status: work in progress.** This is a personal lab, not a production security stack. Some detection rules are deployed but have not been validated end-to-end yet (see [Current Status & Limitations](#current-status--limitations)).
+> **Status: work in progress.** This is a personal lab, not a production security stack. Some detection rules are deployed but have not been validated end-to-end yet (see [Current Status & Limitations](#current-status--limitations)). Treat the KQL and architecture as a learning exercise, not a hardened reference design.
 
 ## About This Project
 
@@ -40,22 +40,39 @@ flowchart TB
 
 ### CI/CD Flow
 
+Four separate workflow files, each with its own trigger and blast radius — deliberately not one mega-pipeline.
+
 ```mermaid
 flowchart LR
-    Dev["Developer pushes\nto branch"] --> PR["Pull Request"]
-    PR --> Validate["validate job\nfmt · validate · TFLint · Checkov"]
-    Validate --> Plan["plan job\nposts diff as PR comment"]
-    Plan --> Review["Code review\n+ plan review"]
-    Review --> Merge["Merge to main"]
-    Merge --> Dispatch["Manual dispatch\naction=apply"]
-    Dispatch --> Gate{"GitHub Environment\napproval gate"}
-    Gate -->|dev: no approval needed| ApplyDev["Apply to dev"]
-    Gate -->|prod: required reviewer| ApplyProd["Apply to prod"]
+    subgraph Foundation["bootstrap.yml — foundation (run once, separate state)"]
+        FTrigger["Manual dispatch\naction=apply"] --> FTF["foundation/ terraform\nRG + Sentinel Contributor role"]
+    end
 
-    DestroyTrigger["Manual dispatch\ndestroy.yml"] --> Confirm["confirm job\ntype 'destroy'"]
-    Confirm --> DestroyGate{"GitHub Environment\napproval gate"}
-    DestroyGate -->|dev| DestroyDev["Destroy dev"]
-    DestroyGate -->|prod: required reviewer| DestroyProd["Destroy prod"]
+    subgraph Main["terraform.yml — main pipeline"]
+        Dev["Developer pushes\nto branch"] --> PR["Pull Request"]
+        PR --> Validate["validate job\nfmt · validate · TFLint · Checkov"]
+        Validate --> Plan["plan job\nposts diff as PR comment"]
+        Plan --> Review["Code review\n+ plan review"]
+        Review --> Merge["Merge to main"]
+        Merge --> Dispatch["Manual dispatch\naction=apply"]
+        Dispatch --> Gate{"GitHub Environment\napproval gate"}
+        Gate -->|dev: no approval needed| ApplyDev["Apply to dev"]
+        Gate -->|prod: required reviewer| ApplyProd["Apply to prod"]
+    end
+
+    subgraph Destroy["destroy.yml — standalone destroy"]
+        DestroyTrigger["Manual dispatch\ndestroy.yml"] --> Confirm["confirm job\ntype 'destroy'"]
+        Confirm --> DestroyGate{"GitHub Environment\napproval gate"}
+        DestroyGate -->|dev| DestroyDev["Destroy dev"]
+        DestroyGate -->|prod: required reviewer| DestroyProd["Destroy prod"]
+    end
+
+    subgraph Watchlist["watchlist-refresh.yml — daily baseline refresh"]
+        WSchedule["Cron 03:00 UTC\nor manual dispatch"] --> WScript["refresh_prt_watchlist.py\nqueries 30d of sign-ins"]
+        WScript --> WUpsert["Upserts items into\nKnownUserAppDevice watchlist\nvia REST API"]
+    end
+
+    Foundation -.->|must run before first apply| Main
 
     style Gate fill:#fef7e0,stroke:#f9ab00
     style ApplyProd fill:#fce8e6,stroke:#ea4335
@@ -292,6 +309,11 @@ terraform apply
 
 ## Known Issues & Workarounds
 
+### AuthorizationFailed on azurerm_role_assignment (bootstrap.yml)
+The `bootstrap.yml` foundation pipeline fails with a 403 `AuthorizationFailed` on `Microsoft.Authorization/roleAssignments/write` if the Terraform SP doesn't already hold a **Role Based Access Control Administrator** assignment on the subscription.
+
+**Fix:** A human with Owner or User Access Administrator rights needs to grant the SP a condition-constrained RBAC Administrator role once, up front — scoped so the SP can only assign the two roles the foundation module needs (Sentinel Contributor and, indirectly, itself), never Owner. `bootstrap.sh` (Option A setup) does this automatically; if you're doing manual setup, this step has to happen before the first `bootstrap.yml` run.
+
 ### SignInLogs table not found
 Alert rules that query `SignInLogs` will fail on first deploy because the table doesn't exist until sign-in data starts flowing into Log Analytics. This is why `signin_outside_trusted` and `impossible_travel` are currently commented out in `modules/monitoring/main.tf`.
 
@@ -329,7 +351,19 @@ If `terraform destroy` fails with `Authorization_RequestDenied` when deleting En
 
 ## CI/CD Pipeline
 
-The project uses workflow files under `.github/workflows/`:
+The project uses four workflow files under `.github/workflows/`, each scoped to a different job:
+
+### `bootstrap.yml` — foundation pipeline
+
+Runs the `foundation/` root module, which has its own state file (`foundation.terraform.tfstate`), separate from the main pipeline's state. It creates the IAM resource group and grants the Terraform SP the **Microsoft Sentinel Contributor** role on that resource group — a prerequisite the main pipeline needs before it can create Sentinel analytics rules.
+
+Manual dispatch only — never runs automatically. Needs to be run:
+- The first time you set up a new environment
+- Any time `terraform destroy` wipes the IAM resource group and you need to recreate it
+
+This pipeline itself depends on the Terraform SP already holding a condition-constrained **Role Based Access Control Administrator** assignment on the subscription, granted once by a human with Owner/User Access Administrator rights (`bootstrap.sh` does this automatically). The condition restricts the SP to assigning only two specific roles, so it can never self-escalate to Owner. Without that pre-existing assignment, this pipeline fails with a 403 on `Microsoft.Authorization/roleAssignments/write`.
+
+**Run order:** `bootstrap.yml` first, then `terraform.yml` with `action=apply`.
 
 ### `terraform.yml` — main pipeline
 
