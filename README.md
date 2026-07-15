@@ -83,7 +83,6 @@ flowchart LR
 
 ## Current Status & Limitations
 
-This is an active, unfinished lab. Please read this section before assuming any of the detections below actually work end-to-end.
 
 | Component | Status |
 |---|---|
@@ -93,7 +92,7 @@ This is an active, unfinished lab. Please read this section before assuming any 
 | New admin role assignment rule | Deployed, working |
 | Bulk user deletion rule | Deployed, working |
 | New MFA registration rule | Deployed ,working |
-| **Illicit OAuth consent grant rule** | Deployed |
+| **Illicit OAuth consent grant rule** | Deployed, working |
 | **PRT theft / replay composite-score rule** | Deployed— depends on the watchlist baseline being populated by `watchlist-refresh.yml` at least once, and the whole scoring logic needs a real (or simulated) non-interactive sign-in to test against |
 | CA policy modified rule | Present in code, but **dormant** — requires Entra ID P2 (Conditional Access) |
 | PIM activation outside hours rule | Present in code, but **dormant** — requires Entra ID P2 (PIM) |
