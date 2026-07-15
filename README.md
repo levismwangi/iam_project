@@ -89,11 +89,9 @@ flowchart LR
 | Users / Groups / App Registrations | Deployed, working |
 | Log Analytics + Entra diagnostic settings | Deployed, working |
 | Sentinel onboarding | Deployed, working |
-| New admin role assignment rule | Deployed, working |
 | Bulk user deletion rule | Deployed, working |
-| New MFA registration rule | Deployed ,working |
 | **Illicit OAuth consent grant rule** | Deployed, working |
-| **PRT theft / replay composite-score rule** | Deployed— depends on the watchlist baseline being populated by `watchlist-refresh.yml` at least once, and the whole scoring logic needs a real (or simulated) non-interactive sign-in to test against |
+| **PRT theft / replay composite-score rule** | Deployed — depends on the watchlist baseline being populated by `watchlist-refresh.yml` at least once, and the whole scoring logic needs a real (or simulated) non-interactive sign-in to test against |
 | CA policy modified rule | Present in code, but **dormant** — requires Entra ID P2 (Conditional Access) |
 | PIM activation outside hours rule | Present in code, but **dormant** — requires Entra ID P2 (PIM) |
 | PIM module | Written but **disabled** — requires Entra ID P2 |
