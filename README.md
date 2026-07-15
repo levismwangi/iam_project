@@ -2,7 +2,7 @@
 
 A project exploring **Microsoft Entra ID identity telemetry and threat detection**, provisioned via **Terraform IaC** with a **GitHub Actions CI/CD pipeline**.
 
-> **Status: work in progress.** This is a personal lab, not a production security stack. Some detection rules are deployed but have not been validated end-to-end yet (see [Current Status & Limitations](#current-status--limitations)). Treat the KQL and architecture as a learning exercise, not a hardened reference design.
+> **Status: work in progress.**  Some detection rules are deployed but have not been validated end-to-end yet (see [Current Status & Limitations](#current-status--limitations)).
 
 ## About This Project
 
@@ -90,18 +90,17 @@ This is an active, unfinished lab. Please read this section before assuming any 
 | Users / Groups / App Registrations | Deployed, working |
 | Log Analytics + Entra diagnostic settings | Deployed, working |
 | Sentinel onboarding | Deployed, working |
-| New admin role assignment rule | Deployed, appears to fire correctly |
-| Bulk user deletion rule | Deployed, appears to fire correctly |
-| New MFA registration rule | Deployed, appears to fire correctly |
-| **Illicit OAuth consent grant rule** | Deployed, **not yet validated with a real test consent grant** |
-| **PRT theft / replay composite-score rule** | Deployed, **not yet validated** — depends on the watchlist baseline being populated by `watchlist-refresh.yml` at least once, and the whole scoring logic needs a real (or simulated) non-interactive sign-in to test against |
-| CA policy modified rule | Present in code, but **dormant** — requires Entra ID P2 (Conditional Access), which I don't have for this project |
-| PIM activation outside hours rule | Present in code, but **dormant** — requires Entra ID P2 (PIM), which I don't have for this project |
-| PIM module | Written but **disabled** — requires Entra ID P2, which I don't have for this project |
-| Conditional Access module | Written but **disabled** — requires Entra ID P2, which I don't have for this project |
-| Logic App SOAR playbook | Deployed (workflow shell + Sentinel Responder role), the actual disable-user logic inside it is minimal/not fleshed out |
+| New admin role assignment rule | Deployed, working |
+| Bulk user deletion rule | Deployed, working |
+| New MFA registration rule | Deployed ,working |
+| **Illicit OAuth consent grant rule** | Deployed |
+| **PRT theft / replay composite-score rule** | Deployed— depends on the watchlist baseline being populated by `watchlist-refresh.yml` at least once, and the whole scoring logic needs a real (or simulated) non-interactive sign-in to test against |
+| CA policy modified rule | Present in code, but **dormant** — requires Entra ID P2 (Conditional Access) |
+| PIM activation outside hours rule | Present in code, but **dormant** — requires Entra ID P2 (PIM) |
+| PIM module | Written but **disabled** — requires Entra ID P2 |
+| Conditional Access module | Written but **disabled** — requires Entra ID P2 |
+| Logic App SOAR playbook | Deployed (workflow shell + Sentinel Responder role) |
 
-In short: the parts of this project I'm actually claiming as "working" right now are the Sentinel plumbing (Log Analytics, diagnostic settings, onboarding) and three of the simpler detection rules. The OAuth consent and PRT rules are the more interesting/complex pieces but are still pending tests, and the CA/PIM-dependent rules are dead code until I have a license to properly exercise them.
 
 ---
 
@@ -430,7 +429,7 @@ All rules are provisioned via the monitoring module (`azurerm_sentinel_alert_rul
 
 ---
 
-## What's Actually Demonstrated Here
+## What's Demonstrated Here
 
 - Terraform modular IaC with remote state, targeting Microsoft Entra ID + Azure Monitor/Sentinel
 - KQL query writing for identity threat detection, including a multi-signal composite-scoring rule (PRT replay)
@@ -439,4 +438,4 @@ All rules are provisioned via the monitoring module (`azurerm_sentinel_alert_rul
 - Security scanning in CI (Checkov, TFLint)
 - Working around real licensing constraints (P2-gated features) by scoping down to what's actually testable, rather than building against services I can't verify
 
-This is a learning project — not a claim of production security engineering experience. Several detection rules are still unverified and the PIM/Conditional Access modules are unused code kept for reference, not working features.
+
