@@ -1,43 +1,39 @@
-# Enterprise IAM Project — Microsoft Entra ID + Terraform
+# Entra ID Cloud Threat Detection Lab — Terraform + Microsoft Sentinel
 
-An Identity and Access Management solution built on **Microsoft Entra ID**, fully provisioned via **Terraform IaC** with a **GitHub Actions CI/CD pipeline**.
+A project exploring **Microsoft Entra ID identity telemetry and threat detection**, provisioned via **Terraform IaC** with a **GitHub Actions CI/CD pipeline**.
+
+> **Status: work in progress.** This is a personal lab, not a production security stack. Some detection rules are deployed but have not been validated end-to-end yet (see [Current Status & Limitations](#current-status--limitations)).
+
+## About This Project
+
+This is a **Log Analytics + Microsoft Sentinel threat-detection lab** built on top of Entra ID Users, Groups, and App Registrations in a free-tier tenant. Entra ID diagnostic settings stream audit and sign-in data into a Log Analytics workspace, which Sentinel is onboarded onto to run scheduled KQL detection rules covering things like privilege escalation, bulk deletions, OAuth consent phishing, and Primary Refresh Token (PRT) theft — with entity mapping, MITRE ATT&CK tagging, a watchlist-backed detection, and a SOAR playbook stub. Everything is provisioned through Terraform with a GitHub Actions CI/CD pipeline (OIDC auth, environment approval gates, drift detection, a separate destroy workflow, and a scheduled watchlist-refresh job).
 
 ## Architecture Overview
 
 ```mermaid
 flowchart TB
-    subgraph Tenant["Microsoft Entra ID Tenant"]
-        Users["Users\n5 departments"]
+    subgraph Tenant["Microsoft Entra ID Tenant (free tier)"]
+        Users["Users\n5 seeded accounts"]
         Groups["Groups\n4 departments"]
         Apps["App Registrations\n3 apps"]
-        PIM["PIM\nJIT role activation"]
     end
 
-    subgraph CA["Conditional Access Policies (7)"]
-        CA1["CA001 Block Legacy Auth"]
-        CA2["CA002 MFA for Admins"]
-        CA3["CA003 MFA for All Users"]
-        CA4["CA004 Risky Locations"]
-        CA5["CA005 Risky Sign-in"]
-        CA6["CA006 Password Change"]
-        CA7["CA007 Unknown Platform"]
-    end
-
-    Tenant --> CA
-    CA -->|Diagnostic Settings| LA["Log Analytics Workspace"]
+    Tenant -->|Diagnostic Settings| LA["Log Analytics Workspace"]
     LA --> Sentinel["Microsoft Sentinel"]
 
     Sentinel --> Alert1["New admin role assignment"]
     Sentinel --> Alert2["Bulk user deletion (3+ in 5 min)"]
-    Sentinel --> Alert3["CA policy modified"]
-    Sentinel --> Alert4["Sign-in outside trusted location"]
-    Sentinel --> Alert5["New MFA method registered"]
-    Sentinel --> Alert6["PIM activation outside hours"]
-    Sentinel --> Alert7["Impossible travel"]
-    Sentinel --> Alert8["Sentinel scheduled analytics rules"]
+    Sentinel --> Alert3["Illicit OAuth consent grant"]
+    Sentinel --> Alert4["New MFA method registered"]
+    Sentinel --> Alert5["PRT theft / replay (composite score)"]
+    Sentinel -.->|dormant, no source events| Alert6["CA policy modified"]
+    Sentinel -.->|dormant, no source events| Alert7["PIM activation outside hours"]
+    Sentinel -.->|commented out, pending SignInLogs| Alert8["Sign-in outside trusted location"]
+    Sentinel -.->|commented out, pending SignInLogs| Alert9["Impossible travel"]
+
+    Sentinel --> Playbook["Logic App playbook\nauto-disable compromised user"]
 
     style Tenant fill:#e8f0fe,stroke:#4285f4
-    style CA fill:#fef7e0,stroke:#f9ab00
     style LA fill:#e6f4ea,stroke:#34a853
     style Sentinel fill:#fce8e6,stroke:#ea4335
 ```
@@ -70,6 +66,32 @@ flowchart LR
 
 ---
 
+## Current Status & Limitations
+
+This is an active, unfinished lab. Please read this section before assuming any of the detections below actually work end-to-end.
+
+| Component | Status |
+|---|---|
+| Users / Groups / App Registrations | Deployed, working |
+| Log Analytics + Entra diagnostic settings | Deployed, working |
+| Sentinel onboarding | Deployed, working |
+| New admin role assignment rule | Deployed, appears to fire correctly |
+| Bulk user deletion rule | Deployed, appears to fire correctly |
+| New MFA registration rule | Deployed, appears to fire correctly |
+| **Illicit OAuth consent grant rule** | Deployed, **not yet validated with a real test consent grant** |
+| **PRT theft / replay composite-score rule** | Deployed, **not yet validated** — depends on the watchlist baseline being populated by `watchlist-refresh.yml` at least once, and the whole scoring logic needs a real (or simulated) non-interactive sign-in to test against |
+| CA policy modified rule | Present in code, but **dormant** — no Conditional Access policies exist in this tenant (no P2 license), so this rule has no events to match |
+| PIM activation outside hours rule | Present in code, but **dormant** — the PIM module is commented out, so no PIM activations ever happen |
+| Sign-in outside trusted location rule | **Commented out** — blocked on `SignInLogs` table not existing yet in this workspace (see Known Issues) |
+| Impossible travel rule | **Commented out** — same blocker as above |
+| PIM module | Written but **disabled** — requires Entra ID P2, which I don't have for this project |
+| Conditional Access module | Written but **disabled** — same licensing reason |
+| Logic App SOAR playbook | Deployed (workflow shell + Sentinel Responder role), the actual disable-user logic inside it is minimal/not fleshed out |
+
+In short: the parts of this project I'm actually claiming as "working" right now are the Sentinel plumbing (Log Analytics, diagnostic settings, onboarding) and three of the simpler detection rules. The OAuth consent and PRT rules are the more interesting/complex pieces but are still pending tests, and the CA/PIM-dependent rules are dead code until I have a license to properly exercise them.
+
+---
+
 ## Prerequisites
 
 | Tool | Version | Purpose |
@@ -78,7 +100,10 @@ flowchart LR
 | Azure CLI | Latest | Authentication |
 | Git | Any | Version control |
 | jq | Any | Required by bootstrap script |
+| Python 3 | Any | Required by `scripts/refresh_prt_watchlist.py` |
 | VS Code + HCL extension | Any | IDE |
+
+A free/standard Entra ID tenant (no P2 license) is sufficient for everything currently deployed. You do **not** need Entra ID P2, M365 E5, or the M365 Developer Program sandbox unless you want to re-enable and test the PIM/Conditional Access modules yourself.
 
 ---
 
@@ -103,7 +128,7 @@ The script will prompt for:
 
 It then handles everything in order:
 1. Creates the Service Principal with Contributor role
-2. Grants all required Microsoft Graph API permissions and admin consent
+2. Grants the required Microsoft Graph API permissions and admin consent
 3. Assigns the Security Administrator role to the SP
 4. Configures OIDC federated credentials (main, dev environment, PR)
 5. Creates the remote state resource group, storage account, and container
@@ -122,23 +147,7 @@ At the end, copy the printed secrets into **GitHub → Settings → Secrets → 
 
 If you prefer to run the steps yourself, follow the sections below.
 
-#### 1. Get a Tenant with the Required Licenses
-
-This project requires **Entra ID P2** for the full feature set (Conditional Access + PIM). The following options all work:
-
-| Option | CA | PIM | Notes |
-|---|---|---|---|
-| M365 Developer Program | ✅ | ✅ | Free 90-day renewable sandbox — recommended for testing. Sign up at [developer.microsoft.com/microsoft-365/dev-program](https://developer.microsoft.com/microsoft-365/dev-program) |
-| Microsoft Entra ID P2 (standalone) | ✅ | ✅ | Covers both features directly |
-| Microsoft 365 E5 | ✅ | ✅ | Includes Entra ID P2 out of the box |
-| Microsoft 365 E3 + Entra ID P2 add-on | ✅ | ✅ | E3 alone does not include P2 |
-| Microsoft 365 Business Premium | ✅ | ❌ | Includes Entra ID P1 — CA works but PIM is not available |
-
-> **Note:** M365 Business Premium is not sufficient for this project — PIM requires Entra ID P2.
-
----
-
-#### 2. Create a Service Principal for Terraform
+#### 1. Create a Service Principal for Terraform
 
 ```bash
 az login --tenant <your-tenant-id>
@@ -155,10 +164,7 @@ Grant the SP these **Microsoft Graph API permissions** (App registrations → AP
 |---|---|
 | `Application.ReadWrite.All` | Create/manage app registrations and service principals |
 | `Directory.ReadWrite.All` | Manage users, groups, and directory objects |
-| `Policy.ReadWrite.ConditionalAccess` | Create and update CA policies |
-| `RoleManagement.ReadWrite.Directory` | Assign Entra ID roles |
-| `PrivilegedAccess.ReadWrite.AzureAD` | Configure PIM policies and assignments |
-| `RoleEligibilitySchedule.ReadWrite.Directory` | Read, update, and delete eligible role assignments |
+| `RoleManagement.ReadWrite.Directory` | Assign Entra ID roles (used for the Sentinel-related role assignments) |
 | `User.ReadWrite.All` | Create, update, and delete user accounts |
 
 > **Important:** All Graph API permissions require **admin consent** — granting the permission alone is not sufficient. Without consent, Terraform apply will fail with `Authorization_RequestDenied (403)`.
@@ -176,7 +182,7 @@ Also assign the SP the **Security Administrator** Entra ID role to allow managin
 
 ---
 
-#### 3. Configure OIDC Federated Identity (No Client Secrets)
+#### 2. Configure OIDC Federated Identity (No Client Secrets)
 
 This project uses **OIDC (Workload Identity Federation)** — GitHub exchanges a short-lived JWT with Azure on every run. No client secrets are stored anywhere.
 
@@ -203,26 +209,17 @@ az ad app federated-credential create --id <APP_CLIENT_ID> --parameters '{
 }'
 ```
 
-Each credential maps to a different pipeline trigger:
-
-| Credential | Subject | Covers |
-|---|---|---|
-| `github-main` | `repo:<org>/<repo>:ref:refs/heads/main` | Push to main |
-| `github-env-dev` | `repo:<org>/<repo>:environment:dev` | `workflow_dispatch` targeting dev |
-| `github-pr` | `repo:<org>/<repo>:pull_request` | Pull requests |
-
-> Use the exact GitHub repo name (case-sensitive). If OIDC auth fails, check the `Azure Login` step logs — it shows the exact subject string GitHub is sending.
-
 ---
 
-#### 4. Create Terraform Remote State Storage
+#### 3. Create Remote State Storage
 
 ```bash
-az group create --name rg-terraform-state --location eastus
+az group create --name rg-terraform-state --location <region>
 
 az storage account create \
   --name tfstateiam \
   --resource-group rg-terraform-state \
+  --location <region> \
   --sku Standard_LRS \
   --encryption-services blob
 
@@ -233,7 +230,7 @@ az storage container create \
 
 ---
 
-#### 5. Create Key Vault and Store Temp Password
+#### 4. Create Key Vault and Store Temp Password
 
 ```bash
 az keyvault create \
@@ -271,7 +268,7 @@ az role assignment create \
 
 ---
 
-#### 6. Configure Variables
+#### 5. Configure Variables
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
@@ -296,20 +293,21 @@ terraform apply
 ## Known Issues & Workarounds
 
 ### SignInLogs table not found
-Alert rules that query `SignInLogs` will fail on first deploy because the table doesn't exist until sign-in data starts flowing into Log Analytics.
+Alert rules that query `SignInLogs` will fail on first deploy because the table doesn't exist until sign-in data starts flowing into Log Analytics. This is why `signin_outside_trusted` and `impossible_travel` are currently commented out in `modules/monitoring/main.tf`.
 
 **Fix:**
-1. Comment out `signin_outside_trusted` and `impossible_travel` in `modules/monitoring/main.tf`
-2. Run `terraform apply` — everything else deploys including diagnostic settings
-3. Sign out and back into the Portal with your admin account
-4. Wait 10-15 minutes for the first sign-in logs to stream through
-5. Verify the table exists: **Log Analytics → Logs → run `SignInLogs | take 5`**
-6. Uncomment the two rules and re-run `terraform apply`
+1. Run `terraform apply` — everything else deploys including diagnostic settings
+2. Sign out and back into the Portal with your admin account
+3. Wait 10-15 minutes for the first sign-in logs to stream through
+4. Verify the table exists: **Log Analytics → Logs → run `SignInLogs | take 5`**
+5. Uncomment the two rules in `modules/monitoring/main.tf` and re-run `terraform apply`
+6. Still needs proper testing once uncommented — haven't validated these two against real sign-in patterns yet
 
-### PIM 403 PermissionScopeNotGranted
-Terraform cannot create PIM eligible assignments without the **Privileged Role Administrator** role on your account.
+### PRT replay rule needs the watchlist populated first
+The `prt_replay_detection` rule explicitly suppresses all findings until the `KnownUserAppDevice` watchlist has at least one item (to avoid every sign-in scoring a false +2 on a cold-start empty baseline). Run `.github/workflows/watchlist-refresh.yml` manually at least once after deploying the monitoring module, before expecting this rule to produce anything.
 
-**Fix:** Entra ID → Roles and administrators → Privileged Role Administrator → Add assignments → your account → wait 30 seconds → re-run `terraform apply`
+### Illicit consent grant and PRT rules — untested
+Both rules are deployed and syntactically valid, but I haven't yet generated a real (or safely simulated) test event for either — a genuine high-privilege OAuth consent grant, or a non-interactive sign-in pattern matching the PRT composite score. Until that's done, treat both as "should work based on the KQL logic" rather than "verified working."
 
 ### Key Vault Forbidden on secret set
 If you get a 403 when setting Key Vault secrets via CLI, your account lacks an access policy or RBAC role on the vault.
@@ -331,7 +329,7 @@ If `terraform destroy` fails with `Authorization_RequestDenied` when deleting En
 
 ## CI/CD Pipeline
 
-The project uses two workflow files under `.github/workflows/`:
+The project uses workflow files under `.github/workflows/`:
 
 ### `terraform.yml` — main pipeline
 
@@ -354,6 +352,10 @@ Kept intentionally separate from the main pipeline to reduce the risk of acciden
 To invoke: **Actions → Terraform Destroy → Run workflow → select environment → type `destroy` → Run workflow**
 
 > The destroy workflow shares the same concurrency group as the main pipeline (`terraform-<environment>`), so a running apply will block a destroy and vice versa.
+
+### `watchlist-refresh.yml` — PRT baseline refresh
+
+Runs daily (03:00 UTC) and on manual dispatch. Queries the last 30 days of sign-in logs for `UserPrincipalName + AppId + DeviceId` combinations and upserts them into the `KnownUserAppDevice` Sentinel watchlist via `scripts/refresh_prt_watchlist.py`. Kept outside the main Terraform pipeline because it manages watchlist *items*, not Terraform-managed resource state.
 
 ### Required GitHub Secrets
 
@@ -384,42 +386,40 @@ Go to **GitHub repo → Settings → Environments → New environment:**
 | Decision | Rationale |
 |----------|-----------|
 | OIDC instead of client secrets | Short-lived tokens — no long-lived credentials stored in GitHub |
-| CA policies start in report-only mode in `dev` | Prevents accidental lockout during testing |
-| Break-glass group excluded from all CA policies | Ensures emergency access is always available |
-| PIM requires MFA + justification on activation | Eliminates standing privileged access |
-| App implicit grant disabled | Forces auth code + PKCE — more secure |
-| `app_role_assignment_required = true` on SPs | Users cannot self-assign to apps |
 | Remote state in Azure Storage | State is encrypted at rest, not stored in Git |
 | `terraform.tfvars` in `.gitignore` | Prevents credentials leaking to Git |
 | Key Vault Secrets User (not Owner) on SP | Least-privilege — read-only access to secrets |
 | Passwords stored in Key Vault | Never hardcoded — fetched at apply time, marked sensitive |
 | Destroy in a separate workflow file | Reduces accidental invocation risk; requires typed confirmation + approval gate |
+| PRT watchlist refresh kept outside Terraform | Terraform can't safely own append-only watchlist item content — see comment in `modules/monitoring/main.tf` |
 
 ---
 
-## Monitoring — Alert Summary
+## Monitoring — Detection Rule Summary
 
-| Alert | Severity | Detection Window | Source |
-|-------|----------|-----------------|--------|
-| New admin role assignment | Medium | Immediate | Log Analytics |
-| Bulk user deletion (3+) | High | 5 min | Log Analytics |
-| CA policy modified/deleted | Medium | Immediate | Log Analytics |
-| Sign-in from risky location | Low | 15 min | Log Analytics |
-| New MFA method registered | Low | Immediate | Log Analytics |
-| PIM activation outside hours | Medium | Immediate | Log Analytics |
-| Impossible travel | High | 1 hr | Sentinel scheduled analytics rule |
+| Rule | Severity | Detection Window | Status |
+|------|----------|-------------------|--------|
+| New admin role assignment | Medium | Immediate | Deployed |
+| Bulk user deletion (3+) | High | 5 min | Deployed |
+| New MFA method registered | Low | Immediate | Deployed |
+| Illicit OAuth consent grant (high-privilege scopes) | High | 1 hr | Deployed, **pending test with a real consent event** |
+| PRT theft / replay (composite score) | High | 1 hr | Deployed, **pending test — also needs watchlist populated first** |
+| CA policy modified/deleted | Medium | Immediate | In code, dormant (no CA policies in this tenant) |
+| PIM activation outside hours | Medium | Immediate | In code, dormant (PIM module disabled) |
+| Sign-in from risky location | Low | 15 min | Commented out, blocked on `SignInLogs` table |
+| Impossible travel | High | 1 hr | Commented out, blocked on `SignInLogs` table |
 
-Sentinel scheduled analytics rules are provisioned via the monitoring module (`azurerm_sentinel_alert_rule_scheduled`) and run KQL queries on a defined cadence against the Log Analytics workspace. See `modules/monitoring/main.tf` for rule definitions.
+All rules are provisioned via the monitoring module (`azurerm_sentinel_alert_rule_scheduled`) and run KQL queries on a defined cadence against the Log Analytics workspace. Full definitions, MITRE ATT&CK tagging, and detection-logic writeups are in `modules/monitoring/main.tf`.
 
 ---
 
-## Skills Demonstrated
+## What's Actually Demonstrated Here
 
-- Microsoft Entra ID (users, groups, apps, CA, PIM)
-- Terraform modular IaC with remote state
-- Zero-trust security design
-- Just-in-time privileged access (PIM)
-- KQL query writing for threat detection
-- Microsoft Sentinel SIEM integration with scheduled analytics rules
-- GitHub Actions CI/CD with OIDC Workload Identity Federation
-- Security scanning (Checkov, TFLint)
+- Terraform modular IaC with remote state, targeting Microsoft Entra ID + Azure Monitor/Sentinel
+- KQL query writing for identity threat detection, including a multi-signal composite-scoring rule (PRT replay)
+- Microsoft Sentinel SIEM integration: workspace onboarding, scheduled analytics rules, entity mapping, MITRE ATT&CK tagging, watchlists
+- GitHub Actions CI/CD with OIDC Workload Identity Federation, environment approval gates, and a scheduled data-refresh job outside the main IaC pipeline
+- Security scanning in CI (Checkov, TFLint)
+- Working around real licensing constraints (P2-gated features) by scoping down to what's actually testable, rather than building against services I can't verify
+
+This is a learning project built solo for an internship/student attachment application — not a claim of production security engineering experience. Several detection rules are still unverified and the PIM/Conditional Access modules are unused code kept for reference, not working features.
