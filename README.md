@@ -26,10 +26,8 @@ flowchart TB
     Sentinel --> Alert3["Illicit OAuth consent grant"]
     Sentinel --> Alert4["New MFA method registered"]
     Sentinel --> Alert5["PRT theft / replay (composite score)"]
-    Sentinel -.->|dormant, no source events| Alert6["CA policy modified"]
-    Sentinel -.->|dormant, no source events| Alert7["PIM activation outside hours"]
-    Sentinel -.->|commented out, pending SignInLogs| Alert8["Sign-in outside trusted location"]
-    Sentinel -.->|commented out, pending SignInLogs| Alert9["Impossible travel"]
+    Sentinel -.->|dormant, requires P2 license| Alert6["CA policy modified"]
+    Sentinel -.->|dormant, requires P2 license| Alert7["PIM activation outside hours"]
 
     Sentinel --> Playbook["Logic App playbook\nauto-disable compromised user"]
 
@@ -97,12 +95,10 @@ This is an active, unfinished lab. Please read this section before assuming any 
 | New MFA registration rule | Deployed, appears to fire correctly |
 | **Illicit OAuth consent grant rule** | Deployed, **not yet validated with a real test consent grant** |
 | **PRT theft / replay composite-score rule** | Deployed, **not yet validated** — depends on the watchlist baseline being populated by `watchlist-refresh.yml` at least once, and the whole scoring logic needs a real (or simulated) non-interactive sign-in to test against |
-| CA policy modified rule | Present in code, but **dormant** — no Conditional Access policies exist in this tenant (no P2 license), so this rule has no events to match |
-| PIM activation outside hours rule | Present in code, but **dormant** — the PIM module is commented out, so no PIM activations ever happen |
-| Sign-in outside trusted location rule | **Commented out** — blocked on `SignInLogs` table not existing yet in this workspace (see Known Issues) |
-| Impossible travel rule | **Commented out** — same blocker as above |
+| CA policy modified rule | Present in code, but **dormant** — requires Entra ID P2 (Conditional Access), which I don't have for this project |
+| PIM activation outside hours rule | Present in code, but **dormant** — requires Entra ID P2 (PIM), which I don't have for this project |
 | PIM module | Written but **disabled** — requires Entra ID P2, which I don't have for this project |
-| Conditional Access module | Written but **disabled** — same licensing reason |
+| Conditional Access module | Written but **disabled** — requires Entra ID P2, which I don't have for this project |
 | Logic App SOAR playbook | Deployed (workflow shell + Sentinel Responder role), the actual disable-user logic inside it is minimal/not fleshed out |
 
 In short: the parts of this project I'm actually claiming as "working" right now are the Sentinel plumbing (Log Analytics, diagnostic settings, onboarding) and three of the simpler detection rules. The OAuth consent and PRT rules are the more interesting/complex pieces but are still pending tests, and the CA/PIM-dependent rules are dead code until I have a license to properly exercise them.
@@ -314,17 +310,6 @@ The `bootstrap.yml` foundation pipeline fails with a 403 `AuthorizationFailed` o
 
 **Fix:** A human with Owner or User Access Administrator rights needs to grant the SP a condition-constrained RBAC Administrator role once, up front — scoped so the SP can only assign the two roles the foundation module needs (Sentinel Contributor and, indirectly, itself), never Owner. `bootstrap.sh` (Option A setup) does this automatically; if you're doing manual setup, this step has to happen before the first `bootstrap.yml` run.
 
-### SignInLogs table not found
-Alert rules that query `SignInLogs` will fail on first deploy because the table doesn't exist until sign-in data starts flowing into Log Analytics. This is why `signin_outside_trusted` and `impossible_travel` are currently commented out in `modules/monitoring/main.tf`.
-
-**Fix:**
-1. Run `terraform apply` — everything else deploys including diagnostic settings
-2. Sign out and back into the Portal with your admin account
-3. Wait 10-15 minutes for the first sign-in logs to stream through
-4. Verify the table exists: **Log Analytics → Logs → run `SignInLogs | take 5`**
-5. Uncomment the two rules in `modules/monitoring/main.tf` and re-run `terraform apply`
-6. Still needs proper testing once uncommented — haven't validated these two against real sign-in patterns yet
-
 ### PRT replay rule needs the watchlist populated first
 The `prt_replay_detection` rule explicitly suppresses all findings until the `KnownUserAppDevice` watchlist has at least one item (to avoid every sign-in scoring a false +2 on a cold-start empty baseline). Run `.github/workflows/watchlist-refresh.yml` manually at least once after deploying the monitoring module, before expecting this rule to produce anything.
 
@@ -440,8 +425,6 @@ Go to **GitHub repo → Settings → Environments → New environment:**
 | PRT theft / replay (composite score) | High | 1 hr | Deployed, **pending test — also needs watchlist populated first** |
 | CA policy modified/deleted | Medium | Immediate | In code, dormant (no CA policies in this tenant) |
 | PIM activation outside hours | Medium | Immediate | In code, dormant (PIM module disabled) |
-| Sign-in from risky location | Low | 15 min | Commented out, blocked on `SignInLogs` table |
-| Impossible travel | High | 1 hr | Commented out, blocked on `SignInLogs` table |
 
 All rules are provisioned via the monitoring module (`azurerm_sentinel_alert_rule_scheduled`) and run KQL queries on a defined cadence against the Log Analytics workspace. Full definitions, MITRE ATT&CK tagging, and detection-logic writeups are in `modules/monitoring/main.tf`.
 
@@ -456,4 +439,4 @@ All rules are provisioned via the monitoring module (`azurerm_sentinel_alert_rul
 - Security scanning in CI (Checkov, TFLint)
 - Working around real licensing constraints (P2-gated features) by scoping down to what's actually testable, rather than building against services I can't verify
 
-This is a learning project built solo for an internship/student attachment application — not a claim of production security engineering experience. Several detection rules are still unverified and the PIM/Conditional Access modules are unused code kept for reference, not working features.
+This is a learning project — not a claim of production security engineering experience. Several detection rules are still unverified and the PIM/Conditional Access modules are unused code kept for reference, not working features.
