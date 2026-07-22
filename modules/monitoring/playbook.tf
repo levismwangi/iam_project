@@ -142,7 +142,7 @@ resource "azurerm_logic_app_action_http" "get_permission_grants" {
 
   run_after {
     action_name   = "Get_Graph_token"
-    action_result = ["Succeeded"]
+    action_result = "Succeeded"
   }
 }
 
@@ -165,7 +165,7 @@ resource "azurerm_logic_app_action_http" "get_graph_token" {
 
   run_after {
     action_name   = "Parse_entities"
-    action_result = ["Succeeded"]
+    action_result = "Succeeded"
   }
 }
 
@@ -245,8 +245,10 @@ resource "azurerm_logic_app_action_http" "revoke_refresh_tokens" {
 
   run_after {
     action_name   = "Get_Graph_token"
-    action_result = ["Succeeded"]
+    action_result = "Succeeded"
   }
+
+
 }
 
 # ── Action 5 — Remove OAuth permission grant ──────────────────────────────────
@@ -275,7 +277,7 @@ resource "azurerm_logic_app_action_custom" "remove_permission_grant" {
       }
     }
     runAfter = {
-      Get_OAuth_permission_grants = ["Succeeded"]
+      Get_OAuth_permission_grants = "Succeeded"
     }
   })
 }
@@ -303,7 +305,7 @@ resource "azurerm_logic_app_action_http" "disable_user_account" {
 
   run_after {
     action_name   = "Revoke_all_refresh_tokens"
-    action_result = ["Succeeded"]
+    action_result = "Succeeded"
   }
 }
 
@@ -331,7 +333,11 @@ resource "azurerm_logic_app_action_http" "post_incident_comment" {
 
   run_after {
     action_name   = "Disable_user_account"
-    action_result = ["Succeeded", "Failed"]
+    action_result = "Succeeded"
+  }
+  run_after {
+    action_name   = "Disable_user_account"
+    action_result = "Failed"
   }
 }
 
@@ -353,7 +359,11 @@ resource "azurerm_logic_app_action_http" "get_sentinel_token" {
 
   run_after {
     action_name   = "Remove_OAuth_permission_grant"
-    action_result = ["Succeeded", "Failed"]
+    action_result = "Succeeded"
+  }
+  run_after {
+    action_name   = "Remove_OAuth_permission_grant"
+    action_result = "Failed"
   }
 }
 
@@ -365,8 +375,11 @@ resource "azurerm_logic_app_action_http" "get_sentinel_token" {
 # PRODUCTION NOTE: Remove this automation rule and trigger the playbook
 # manually from the incident if you want analyst-in-the-loop approval
 # before automated remediation runs.
+
+resource "random_uuid" "consent_grant_response" {}
+
 resource "azurerm_sentinel_automation_rule" "consent_grant_response" {
-  name                       = "consent-grant-auto-response"
+  name                       = random_uuid.consent_grant_response.result
   log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
   display_name               = "Auto-respond to Illicit Consent Grant incidents"
   order                      = 1
