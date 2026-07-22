@@ -4,9 +4,7 @@ An automated cloud threat detection and response platform built on **Microsoft S
 
 > **Status: work in progress.**  Some detection rules are deployed but have not been validated end-to-end yet (see [Current Status & Limitations](#current-status--limitations)).
 
-## About This Project
 
----
 
 ## What This Is
 
@@ -19,79 +17,33 @@ An automated cloud threat detection and response platform built on **Microsoft S
 
 ---
 
-## Architecture
+## Architecture Overview
 
 ```mermaid
 flowchart TB
-    subgraph Entra["Microsoft Entra ID"]
-        Users["Users (5)"]
-        Groups["Groups (4 dept.)"]
-        Apps["App Registrations (3)"]
+    subgraph Tenant["Microsoft Entra ID Tenant (free tier)"]
+        Users["Users\n5 seeded accounts"]
+        Groups["Groups\n4 departments"]
+        Apps["App Registrations\n3 apps"]
     end
 
-    subgraph Detection["Threat Detection"]
-        DS["Entra ID Diagnostic Settings"]
-        LAW["Log Analytics Workspace"]
-        Sentinel["Microsoft Sentinel"]
-        Watchlist["KnownUserAppDevice\nWatchlist (PRT Baseline)"]
-    end
+    Tenant -->|Diagnostic Settings| LA["Log Analytics Workspace"]
+    LA --> Sentinel["Microsoft Sentinel"]
 
-    subgraph Rules["Analytics Rules (9)"]
-        R1["New Admin Role Assignment"]
-        R2["Bulk User Deletion"]
-        R3["CA Policy Modified"]
-        R4["New MFA Registration"]
-        R5["PIM Outside Hours"]
-        R6["Illicit Consent Grant"]
-        R7["PRT Replay — Composite Score"]
-        R8["Sign-in Untrusted Location*"]
-        R9["Impossible Travel*"]
-    end
+    Sentinel --> Alert1["New admin role assignment"]
+    Sentinel --> Alert2["Bulk user deletion (3+ in 5 min)"]
+    Sentinel --> Alert3["Illicit OAuth consent grant"]
+    Sentinel --> Alert4["New MFA method registered"]
+    Sentinel --> Alert5["PRT theft / replay (composite score)"]
+    Sentinel -.->|dormant, requires P2 license| Alert6["CA policy modified"]
+    Sentinel -.->|dormant, requires P2 license| Alert7["PIM activation outside hours"]
 
-    subgraph Response["Automated Response"]
-        AG["Action Group\n(email alerts)"]
-        LA["Logic App Playbook\n(disable compromised user)"]
-    end
+    Sentinel --> Playbook["Logic App playbook\nauto-disable compromised user"]
 
-    Entra -->|audit + sign-in logs| DS
-    DS --> LAW
-    LAW --> Sentinel
-    Watchlist --> R7
-    Sentinel --> Rules
-    Rules --> AG
-    Rules --> LA
-
-    style Entra fill:#e8f0fe,stroke:#4285f4
-    style Detection fill:#e6f4ea,stroke:#34a853
-    style Rules fill:#fef7e0,stroke:#f9ab00
-    style Response fill:#fce8e6,stroke:#ea4335
+    style Tenant fill:#e8f0fe,stroke:#4285f4
+    style LA fill:#e6f4ea,stroke:#34a853
+    style Sentinel fill:#fce8e6,stroke:#ea4335
 ```
-
-\* Commented out on first deploy — requires `SignInLogs` table to populate before enabling. See [Known Issues](KNOWN_ISSUES.md).
-
-### CI/CD Pipeline
-
-```mermaid
-flowchart LR
-    PR["Pull Request"] --> Validate["Validate & Lint\nfmt · validate · TFLint · Checkov"]
-    Validate --> Plan["Terraform Plan\n(posts diff to PR)"]
-    Plan --> Merge["Merge to main"]
-    Merge --> Dispatch["Manual dispatch\naction=apply"]
-    Dispatch --> Gate{"GitHub Environment\napproval gate"}
-    Gate -->|dev| ApplyDev["Apply to dev"]
-    Gate -->|prod: reviewer required| ApplyProd["Apply to prod"]
-
-    Bootstrap["Bootstrap Pipeline\n(manual, run once)"] --> Foundation["foundation/\nResource group + roles"]
-    Foundation --> Dispatch
-
-    WatchlistRefresh["Watchlist Refresh\n(daily 03:00 UTC)"] --> Baseline["Rebuild PRT baseline\nvia Sentinel REST API"]
-
-    style Gate fill:#fef7e0,stroke:#f9ab00
-    style ApplyProd fill:#fce8e6,stroke:#ea4335
-    style Bootstrap fill:#e8f0fe,stroke:#4285f4
-```
-
----
 
 ### CI/CD Flow
 
@@ -163,38 +115,6 @@ flowchart LR
 |------|-------|----------|--------|
 | Sign-in from Untrusted Location | T1078 — Initial Access | Medium | SignInLogs |
 | Impossible Travel | T1078 — Initial Access | High | SignInLogs |
-
----
-
-## PRT Detection — Deep Dive
-
-The PRT (Primary Refresh Token) detection rule is the most sophisticated rule in the project. Here's why it exists and how it works.
-
-### Threat Model
-
-A Primary Refresh Token, together with its session key, is the artifact Entra-joined devices use to mint fresh access tokens without re-prompting the user — including inheriting an MFA-satisfied claim. If an attacker extracts a PRT from LSASS memory on a compromised device, they can replay it from a completely different machine and mint valid, MFA-claiming tokens with no interactive sign-in. The resulting sign-in event is structurally identical to a legitimate one — failed-login and password-spray detections see nothing.
-
-### Why a Composite Score?
-
-No single field in `SignInLogs` reliably distinguishes a replayed PRT from a legitimate non-interactive sign-in. The rule scores four independent signals:
-
-| Signal | Score | Rationale |
-|--------|-------|-----------|
-| Unbaselined User+App+Device combo | +2 | Not seen in 30-day history — new context |
-| High-risk first-party client ID (Azure CLI, Az PowerShell) | +2 | Commonly abused by broker tooling for silent token issuance |
-| MFA satisfied by claim in token | +2 | MFA inherited from PRT — no fresh challenge performed |
-| Same DeviceId from 2+ IPs in 1 hour | +3 | Physical impossibility — device can't be in two places |
-
-Default threshold: **5**. A score of 5+ fires the incident.
-
-### Watchlist
-
-The `KnownUserAppDevice` watchlist is a rolling 30-day baseline of User+App+Device combinations seen in sign-in history. It's refreshed daily by `.github/workflows/watchlist-refresh.yml` via the Sentinel Watchlist Items REST API — out-of-band from Terraform state, intentionally (see [Known Issues](KNOWN_ISSUES.md) for why).
-
-### Scoping Note
-
-A fifth signal — device compliance-state mismatch via Intune — is intentionally omitted. This project does not provision Intune, so no compliance telemetry exists to join against. Documented here rather than silently absent.
-
 
 ---
 
@@ -281,7 +201,6 @@ It then handles everything in order:
 11. Prints all required GitHub secrets with their values
 
 At the end, copy the printed secrets into **GitHub → Settings → Secrets → Actions**, then proceed to [Deploy](#deploy).
-
 
 ---
 
@@ -432,35 +351,15 @@ terraform apply
 
 ---
 
-## Deployment Notes
-
-### Propagation waits
-
-Two `time_sleep` resources are used to work around Azure's asynchronous RBAC propagation:
-
-- `wait_for_sentinel_permissions` — 300 seconds after Sentinel onboarding, before any rules are created. Gives the Sentinel Contributor role time to cascade from the resource group to the workspace child resource.
-- `wait_for_logic_app_identity` — 120 seconds after Logic App creation, before the Sentinel Responder role is assigned to its managed identity. Gives Entra ID time to fully provision the system-assigned identity.
-
-### Two-environment support
-
-The pipeline supports `dev` and `prod` environments via workflow dispatch inputs. Prod requires a designated reviewer to approve before apply or destroy. The nightly drift detection schedule is disabled until prod is configured — see `terraform.yml`.
-
-### Destroying and recreating
-
-Running `terraform destroy` on the main pipeline wipes all resources in main state but leaves the foundation intact (separate state file). Foundation only needs to be destroyed when decommissioning completely. Order for full teardown: main destroy → bootstrap destroy.
-
----
-
 ## Known Issues & Workarounds
 
 ### AuthorizationFailed on azurerm_role_assignment (bootstrap.yml)
 The `bootstrap.yml` foundation pipeline fails with a 403 `AuthorizationFailed` on `Microsoft.Authorization/roleAssignments/write` if the Terraform SP doesn't already hold a **Role Based Access Control Administrator** assignment on the subscription.
 
-**Fix:** A human with Owner or User Access Administrator rights needs to grant the SP a condition-constrained RBAC Administrator role once, up front — scoped so the SP can only assign the two roles the foundation module needs (Sentinel Contributor and, indirectly, itself), never Owner. `bootstrap.sh` (Option A setup) does this automatically; if you're doing manual setup, this step has to happen before the first `bootstrap.yml` run.
+**Fix:** A human with Owner or User Access Administrator rights needs to grant the SP a RBAC Administrator role once, up front.
 
 ### PRT replay rule needs the watchlist populated first
 The `prt_replay_detection` rule explicitly suppresses all findings until the `KnownUserAppDevice` watchlist has at least one item (to avoid every sign-in scoring a false +2 on a cold-start empty baseline). Run `.github/workflows/watchlist-refresh.yml` manually at least once after deploying the monitoring module, before expecting this rule to produce anything.
-
 
 ### Key Vault Forbidden on secret set
 If you get a 403 when setting Key Vault secrets via CLI, your account lacks an access policy or RBAC role on the vault.
@@ -492,7 +391,7 @@ Manual dispatch only — never runs automatically. Needs to be run:
 - The first time you set up a new environment
 - Any time `terraform destroy` wipes the IAM resource group and you need to recreate it
 
-This pipeline itself depends on the Terraform SP already holding a  **Role Based Access Control Administrator** assignment on the subscription, granted once by a human with Owner/User Access Administrator rights (`bootstrap.sh` does this automatically). 
+This pipeline itself depends on the Terraform SP already holding a condition-constrained **Role Based Access Control Administrator** assignment on the subscription, granted once by a human with Owner/User Access Administrator rights (`bootstrap.sh` does this automatically). The condition restricts the SP to assigning only two specific roles, so it can never self-escalate to Owner. Without that pre-existing assignment, this pipeline fails with a 403 on `Microsoft.Authorization/roleAssignments/write`.
 
 **Run order:** `bootstrap.yml` first, then `terraform.yml` with `action=apply`.
 
@@ -561,15 +460,13 @@ Go to **GitHub repo → Settings → Environments → New environment:**
 ---
 
 
-
-## What's Demonstrated Here
+## Skills Demonstrated
 
 - Terraform modular IaC with remote state, targeting Microsoft Entra ID + Azure Monitor/Sentinel
 - KQL query writing for identity threat detection, including a multi-signal composite-scoring rule (PRT replay)
 - Microsoft Sentinel SIEM integration: workspace onboarding, scheduled analytics rules, entity mapping, MITRE ATT&CK tagging, watchlists
 - GitHub Actions CI/CD with OIDC Workload Identity Federation, environment approval gates, and a scheduled data-refresh job outside the main IaC pipeline
 - Security scanning in CI (Checkov, TFLint)
-- Python(watchlist refresh script & illicit consent graph test script)
-- Working around real licensing constraints (P2-gated features) by scoping down to what's actually testable, rather than building against services I can't verify
+- Python scripting(watchlist refresh script & illicit consent grant script)
 
 
