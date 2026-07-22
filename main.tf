@@ -1,16 +1,13 @@
 # ROOT main.tf — Wires all modules together
 #
-# NOTE: The IAM resource group is created by the foundation/ module,
-# not here. It is referenced via a data source below. Run the
-# bootstrap pipeline (bootstrap.yml) before the first apply.
+# The IAM resource group is created by foundation/ and referenced
+# here via a data source. Run bootstrap.yml before the first apply.
 
 locals {
   resource_prefix = "${var.company_name}-${var.environment}"
 }
 
 # ── IAM Resource Group (managed by foundation/) ───────────────────────────────
-# Created by foundation/main.tf. The bootstrap pipeline must run
-# before this root module to ensure the resource group exists.
 data "azurerm_resource_group" "iam" {
   name = "rg-${local.resource_prefix}-iam"
 }
@@ -30,17 +27,6 @@ module "groups" {
   users        = module.users.user_objects
   company_name = var.company_name
 }
-
-# Tenant is not licensed for Conditional Access — module disabled.
-# Uncomment once Entra ID P2 license is available.
-/*
-module "conditional_access" {
-  source               = "./modules/conditional_access"
-  it_group_object_id   = module.groups.group_object_ids["IT"]
-  break_glass_group_id = module.groups.break_glass_group_id
-  environment          = var.environment
-}
-*/
 
 # ── Module: App Registrations ─────────────────────────────────────────────────
 module "app_registrations" {
@@ -64,37 +50,6 @@ module "app_registrations" {
   }
 }
 
-# ── PIM locals ────────────────────────────────────────────────────────────────
-data "azurerm_role_definition" "reader" {
-  name = "Reader"
-}
-
-data "azurerm_subscription" "primary" {}
-
-locals {
-  reader_role_definition_id = "${data.azurerm_subscription.primary.id}${data.azurerm_role_definition.reader.id}"
-
-  pim_rbac_eligible_assignments = {
-    bob_subscription_reader = {
-      scope              = data.azurerm_subscription.primary.id
-      role_definition_id = local.reader_role_definition_id
-      principal_key      = "bob_otieno"
-      duration_hours     = 8
-      justification      = "IT engineer requires temporary Reader access at the subscription level for troubleshooting"
-    }
-  }
-}
-
-# PIM module — disabled until Entra ID P2 license is available.
-/*
-module "pim" {
-  source        = "./modules/pim"
-  user_objects  = module.users.user_objects
-  group_objects = module.groups.group_object_ids
-  directory_role_eligible_assignments = var.pim_eligible_assignments
-}
-*/
-
 # ── Module: Monitoring ────────────────────────────────────────────────────────
 module "monitoring" {
   source              = "./modules/monitoring"
@@ -103,6 +58,7 @@ module "monitoring" {
   resource_prefix     = local.resource_prefix
   alert_email         = var.alert_email
   log_retention_days  = var.log_retention_days
+  tenant_id           = var.tenant_id
 }
 
 # ── Key Vault (temp password) ─────────────────────────────────────────────────

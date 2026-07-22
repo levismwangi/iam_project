@@ -24,6 +24,11 @@ variable "log_retention_days" {
   default     = 30
 }
 
+variable "tenant_id" {
+  description = "Azure AD Tenant ID — required by the Sentinel automation rule to invoke the Logic App playbook"
+  type        = string
+}
+
 variable "prt_high_risk_client_ids" {
   description = "Well-known first-party Entra client IDs treated as higher-risk when used non-interactively from an unbaselined device — see the PRT replay detection rule's threat model comment."
   type        = list(string)

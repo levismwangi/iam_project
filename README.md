@@ -243,7 +243,22 @@ Also assign the SP the **Security Administrator** Entra ID role to allow managin
 
 ---
 
-#### 2. Configure OIDC Federated Identity (No Client Secrets)
+#### 2. Manual RBAC Administrator assignment
+
+The SP needs **Role Based Access Control Administrator** at subscription scope to assign the Sentinel Responder role to the Logic App's managed identity. This must be done manually — a SP cannot bootstrap its own elevated permissions:
+
+```bash
+az role assignment create \
+  --assignee-object-id <SP_OBJECT_ID> \
+  --assignee-principal-type ServicePrincipal \
+  --role "Role Based Access Control Administrator" \
+  --scope /subscriptions/<SUBSCRIPTION_ID>
+```
+
+> **Why unconstrained?** An ABAC condition was attempted to constrain this to Sentinel Responder only. It worked at resource group scope but failed when the role assignment action targeted the Log Analytics workspace child resource — Azure's condition evaluation does not resolve `@Request[RoleDefinitionId]` correctly across scope inheritance boundaries at child resource level. Documented in [Known Issues](KNOWN_ISSUES.md).
+
+
+#### 3. Configure OIDC Federated Identity (No Client Secrets)
 
 This project uses **OIDC (Workload Identity Federation)** — GitHub exchanges a short-lived JWT with Azure on every run. No client secrets are stored anywhere.
 
@@ -272,7 +287,7 @@ az ad app federated-credential create --id <APP_CLIENT_ID> --parameters '{
 
 ---
 
-#### 3. Create Remote State Storage
+#### 4. Create Remote State Storage
 
 ```bash
 az group create --name rg-terraform-state --location <region>
@@ -291,7 +306,7 @@ az storage container create \
 
 ---
 
-#### 4. Create Key Vault and Store Temp Password
+#### 5. Create Key Vault and Store Temp Password
 
 ```bash
 az keyvault create \
@@ -329,7 +344,7 @@ az role assignment create \
 
 ---
 
-#### 5. Configure Variables
+#### 6. Configure Variables
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
@@ -342,14 +357,84 @@ cp terraform.tfvars.example terraform.tfvars
 
 ## Deploy
 
+### Step 1 — Add GitHub repository variables
+
+**Settings → Variables → Actions:**
+
+| Variable | Value |
+|----------|-------|
+| `COMPANY_NAME` | Your company name (used in resource naming) |
+| `AZURE_LOCATION` | e.g. `southafricanorth` |
+
+### Step 2 — Add GitHub repository secrets
+
+**Settings → Secrets → Actions:**
+
+| Secret | Description |
+|--------|-------------|
+| `AZURE_CLIENT_ID_DEV` | SP client ID |
+| `AZURE_SUBSCRIPTION_ID_DEV` | Subscription ID |
+| `AZURE_TENANT_ID_DEV` | Tenant ID |
+| `AZURE_TENANT_DOMAIN_DEV` | e.g. `contoso.onmicrosoft.com` |
+| `TF_STATE_ACCESS_KEY_DEV` | Storage account access key |
+| `KEY_VAULT_NAME_DEV` | Key Vault name |
+| `ALERT_EMAIL` | Email for security alert notifications |
+
+> `AZURE_CLIENT_SECRET` is intentionally absent — OIDC eliminates the need for it.
+
+### Step 3 — Create GitHub Environments
+
+**Settings → Environments → New environment:**
+- `dev` — no protection rules needed
+- `prod` — add Required reviewers
+
+### Step 4 — Run bootstrap pipeline
+
+```
+Actions → Bootstrap Foundation → Run workflow → dev → apply
+```
+
+### Step 5 — Deploy
+
+```
+Actions → Terraform IAM Pipeline → Run workflow → dev → apply
+```
+
+On first deploy, `azurerm_monitor_aad_diagnostic_setting` may fail with a provider inconsistency error — re-run apply. See [Known Issues](KNOWN_ISSUES.md).
+
+### Step 6 — Grant playbook Graph permissions
+
 ```bash
-terraform init
-terraform validate
-terraform plan
-terraform apply
+bash scripts/grant_playbook_permissions.sh
+```
+
+### Step 7 — Seed the PRT watchlist
+
+```
+Actions → PRT Watchlist Refresh → Run workflow → dev
 ```
 
 ---
+
+## Deployment Notes
+
+### Propagation waits
+
+Two `time_sleep` resources work around Azure's asynchronous RBAC propagation:
+
+- `wait_for_sentinel_permissions` — 300 seconds after Sentinel onboarding, before any rules are created
+- `wait_for_logic_app_identity` — 120 seconds after Logic App creation, before the Sentinel Responder role is assigned to its managed identity
+
+### Two-environment support
+
+The pipeline supports `dev` and `prod` via workflow dispatch inputs. Prod requires a designated reviewer to approve before apply or destroy. Nightly drift detection is disabled until prod is configured — see `terraform.yml`.
+
+### Destroying and recreating
+
+`terraform destroy` wipes main state but leaves foundation intact (separate state file). Order for full teardown: main destroy → bootstrap destroy. See [Known Issues](KNOWN_ISSUES.md) for what roles need recreating after destroy.
+
+---
+
 
 
 ## CI/CD Pipeline
