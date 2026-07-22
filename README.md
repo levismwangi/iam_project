@@ -351,33 +351,6 @@ terraform apply
 
 ---
 
-## Known Issues & Workarounds
-
-### AuthorizationFailed on azurerm_role_assignment (bootstrap.yml)
-The `bootstrap.yml` foundation pipeline fails with a 403 `AuthorizationFailed` on `Microsoft.Authorization/roleAssignments/write` if the Terraform SP doesn't already hold a **Role Based Access Control Administrator** assignment on the subscription.
-
-**Fix:** A human with Owner or User Access Administrator rights needs to grant the SP a RBAC Administrator role once, up front.
-
-### PRT replay rule needs the watchlist populated first
-The `prt_replay_detection` rule explicitly suppresses all findings until the `KnownUserAppDevice` watchlist has at least one item (to avoid every sign-in scoring a false +2 on a cold-start empty baseline). Run `.github/workflows/watchlist-refresh.yml` manually at least once after deploying the monitoring module, before expecting this rule to produce anything.
-
-### Key Vault Forbidden on secret set
-If you get a 403 when setting Key Vault secrets via CLI, your account lacks an access policy or RBAC role on the vault.
-
-**Fix:**
-```bash
-az role assignment create \
-  --role "Key Vault Secrets Officer" \
-  --assignee <your-object-id> \
-  --scope "/subscriptions/<sub-id>/resourcegroups/<rg>/providers/Microsoft.KeyVault/vaults/<vault-name>"
-```
-
-### 403 on destroy — user deletion fails
-If `terraform destroy` fails with `Authorization_RequestDenied` when deleting Entra ID users, the SP is missing `User.ReadWrite.All`.
-
-**Fix:** Entra ID → App registrations → your SP → API permissions → Add `User.ReadWrite.All` (Application) → Grant admin consent → re-run destroy.
-
----
 
 ## CI/CD Pipeline
 
@@ -456,6 +429,35 @@ Go to **GitHub repo → Settings → Environments → New environment:**
 | Passwords stored in Key Vault | Never hardcoded — fetched at apply time, marked sensitive |
 | Destroy in a separate workflow file | Reduces accidental invocation risk; requires typed confirmation + approval gate |
 | PRT watchlist refresh kept outside Terraform | Terraform can't safely own append-only watchlist item content — see comment in `modules/monitoring/main.tf` |
+
+---
+
+
+## Known Issues & Workarounds
+
+### AuthorizationFailed on azurerm_role_assignment (bootstrap.yml)
+The `bootstrap.yml` foundation pipeline fails with a 403 `AuthorizationFailed` on `Microsoft.Authorization/roleAssignments/write` if the Terraform SP doesn't already hold a **Role Based Access Control Administrator** assignment on the subscription.
+
+**Fix:** A human with Owner or User Access Administrator rights needs to grant the SP a RBAC Administrator role once, up front.
+
+### PRT replay rule needs the watchlist populated first
+The `prt_replay_detection` rule explicitly suppresses all findings until the `KnownUserAppDevice` watchlist has at least one item (to avoid every sign-in scoring a false +2 on a cold-start empty baseline). Run `.github/workflows/watchlist-refresh.yml` manually at least once after deploying the monitoring module, before expecting this rule to produce anything.
+
+### Key Vault Forbidden on secret set
+If you get a 403 when setting Key Vault secrets via CLI, your account lacks an access policy or RBAC role on the vault.
+
+**Fix:**
+```bash
+az role assignment create \
+  --role "Key Vault Secrets Officer" \
+  --assignee <your-object-id> \
+  --scope "/subscriptions/<sub-id>/resourcegroups/<rg>/providers/Microsoft.KeyVault/vaults/<vault-name>"
+```
+
+### 403 on destroy — user deletion fails
+If `terraform destroy` fails with `Authorization_RequestDenied` when deleting Entra ID users, the SP is missing `User.ReadWrite.All`.
+
+**Fix:** Entra ID → App registrations → your SP → API permissions → Add `User.ReadWrite.All` (Application) → Grant admin consent → re-run destroy.
 
 ---
 
